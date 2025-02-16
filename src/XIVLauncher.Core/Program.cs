@@ -47,10 +47,19 @@ sealed class Program
     public static DalamudOverlayInfoProxy DalamudLoadInfo { get; private set; } = null!;
     public static CompatibilityTools CompatibilityTools { get; private set; } = null!;
     public static ISecretProvider Secrets { get; private set; } = null!;
-    public static HttpClient HttpClient { get; private set; } = new()
+
+    private static readonly Lazy<HttpClient> _httpClient = new Lazy<HttpClient>(() =>
     {
-        Timeout = TimeSpan.FromSeconds(5)
-    };
+        var client = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(5)
+        };
+        client.DefaultRequestHeaders.Add("User-Agent", PlatformHelpers.GetVersion());
+
+        return client;
+    });
+
+    public static HttpClient HttpClient => _httpClient.Value;
 
     private static readonly Vector3 ClearColor = new(0.1f, 0.1f, 0.1f);
 
