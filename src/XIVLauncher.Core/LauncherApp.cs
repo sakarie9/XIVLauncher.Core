@@ -41,7 +41,6 @@ public class LauncherApp : Component
         Loading,
         OtpEntry,
         Fts,
-        UpdateWarn,
         SteamDeckPrompt,
         QrEntry,
     }
@@ -87,10 +86,6 @@ public class LauncherApp : Component
                     this.ftsPage.OnShow();
                     break;
 
-                case LauncherState.UpdateWarn:
-                    this.updateWarnPage.OnShow();
-                    break;
-
                 case LauncherState.SteamDeckPrompt:
                     this.steamDeckPromptPage.OnShow();
                     break;
@@ -109,7 +104,6 @@ public class LauncherApp : Component
         LauncherState.OtpEntry => this.otpEntryPage,
         LauncherState.QrEntry => this.qrEntryPage,
         LauncherState.Fts => this.ftsPage,
-        LauncherState.UpdateWarn => this.updateWarnPage,
         LauncherState.SteamDeckPrompt => this.steamDeckPromptPage,
         _ => throw new ArgumentOutOfRangeException(nameof(this.state), this.state, null)
     };
@@ -129,12 +123,11 @@ public class LauncherApp : Component
     private readonly OtpEntryPage otpEntryPage;
     private readonly QrEntryPage qrEntryPage;
     private readonly FtsPage ftsPage;
-    private readonly UpdateWarnPage updateWarnPage;
     private readonly SteamDeckPromptPage steamDeckPromptPage;
 
     private readonly Background background = new();
 
-    public LauncherApp(Storage storage, bool needsUpdateWarning, string frontierUrl, string? cutOffBootver)
+    public LauncherApp(Storage storage, string frontierUrl, string? cutOffBootver)
     {
         this.Storage = storage;
 
@@ -148,7 +141,6 @@ public class LauncherApp : Component
         this.qrEntryPage = new QrEntryPage(this);
         this.LoadingPage = new LoadingPage(this);
         this.ftsPage = new FtsPage(this);
-        this.updateWarnPage = new UpdateWarnPage(this);
         this.steamDeckPromptPage = new SteamDeckPromptPage(this);
 
         if (!EnvironmentSettings.IsNoKillswitch && !string.IsNullOrEmpty(cutOffBootver))
@@ -166,14 +158,7 @@ public class LauncherApp : Component
             }
         }
 
-        if (needsUpdateWarning)
-        {
-            this.State = LauncherState.UpdateWarn;
-        }
-        else
-        {
-            this.RunStartupTasks();
-        }
+        this.RunStartupTasks();
 
 #if DEBUG
         IsDebug = true;
@@ -289,15 +274,11 @@ public class LauncherApp : Component
         this.State = LauncherState.Main;
     }
 
-    public void FinishFromUpdateWarn()
-    {
-        this.State = LauncherState.Main;
-        this.RunStartupTasks();
-    }
-
     public void RunStartupTasks()
     {
+#if FLATPAK
         this.ftsPage.OpenFtsIfNeeded();
+#endif
         this.mainPage.DoAutoLoginIfApplicable();
     }
 

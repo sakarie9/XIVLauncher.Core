@@ -152,7 +152,14 @@ public class LoginFrame : Component
 
                 ImGui.Separator();
 
-                if (ImGui.MenuItem("启动时禁用自定义库插件"))
+                if (ImGui.MenuItem("启动但不加载任何插件"))
+                {
+                    this.OnLogin?.Invoke(LoginAction.GameNoPlugins);
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("启动但不加载自定义插件"))
                 {
                     this.OnLogin?.Invoke(LoginAction.GameNoThirdparty);
                 }

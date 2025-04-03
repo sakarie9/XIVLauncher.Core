@@ -15,6 +15,7 @@ using Veldrid.StartupUtilities;
 
 using XIVLauncher.Common;
 using XIVLauncher.Common.Dalamud;
+using XIVLauncher.Common.Game.Patch;
 using XIVLauncher.Common.Game.Patch.Acquisition;
 using XIVLauncher.Common.PlatformAbstractions;
 using XIVLauncher.Common.Support;
@@ -60,6 +61,7 @@ sealed class Program
     });
 
     public static HttpClient HttpClient => _httpClient.Value;
+    public static PatchManager Patcher { get; set; } = null!;
 
     private static readonly Vector3 ClearColor = new(0.1f, 0.1f, 0.1f);
 
@@ -151,6 +153,7 @@ sealed class Program
         Config.FixLDP ??= false;
         Config.FixIM ??= false;
         Config.FixLocale ??= false;
+        Config.FixError127 ??= false;
     }
 
     public const uint STEAM_APP_ID = 39210;
@@ -212,29 +215,25 @@ sealed class Program
 
         Loc.SetupWithFallbacks();
 
-        uint appId, altId;
-        string appName, altName;
-        // AppId of 0 is invalid (though still a valid uint)
-        if (CoreEnvironmentSettings.AltAppID > 0)
+        Dictionary<uint, string> apps = new Dictionary<uint, string>();
+        uint[] ignoredIds = { 0, STEAM_APP_ID, STEAM_APP_ID_FT };
+        if (!ignoredIds.Contains(CoreEnvironmentSettings.SteamAppId))
         {
-            appId = CoreEnvironmentSettings.AltAppID;
-            altId = STEAM_APP_ID_FT;
-            appName = $"Override AppId={appId.ToString()}";
-            altName = "FFXIV Free Trial";
+            apps.Add(CoreEnvironmentSettings.SteamAppId, "XLM");
         }
-        else if (Config.IsFt == true)
+        if (!ignoredIds.Contains(CoreEnvironmentSettings.AltAppID))
         {
-            appId = STEAM_APP_ID_FT;
-            altId = STEAM_APP_ID;
-            appName = "FFXIV Free Trial";
-            altName = "FFXIV Retail";
+            apps.Add(CoreEnvironmentSettings.AltAppID, "XL_APPID");
+        }
+        if (Config.IsFt == true)
+        {
+            apps.Add(STEAM_APP_ID_FT, "FFXIV Free Trial");
+            apps.Add(STEAM_APP_ID, "FFXIV Retail");
         }
         else
         {
-            appId = STEAM_APP_ID;
-            altId = STEAM_APP_ID_FT;
-            appName = "FFXIV Retail";
-            altName = "FFXIV Free Trial";
+            apps.Add(STEAM_APP_ID, "FFXIV Retail");
+            apps.Add(STEAM_APP_ID_FT, "FFXIV Free Trial");
         }
         try
         {
@@ -253,14 +252,18 @@ sealed class Program
             }
             if (Config.IsIgnoringSteam != true || CoreEnvironmentSettings.IsSteamCompatTool)
             {
-                try
+                foreach (var app in apps)
                 {
-                    Steam.Initialize(appId);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, $"Couldn't init Steam with AppId={appId} ({appName}), trying AppId={altId} ({altName})");
-                    Steam.Initialize(altId);
+                    try
+                    {
+                        Steam.Initialize(app.Key);
+                        Log.Information($"Successfully initialized Steam entry {app.Key} - {app.Value}");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, $"Failed to initialize Steam Steam entry {app.Key} - {app.Value}");
+                    }
                 }
             }
         }
@@ -306,22 +309,8 @@ sealed class Program
         StyleModelV1.DalamudStandard.Apply();
         ImGui.GetIO().FontGlobalScale = Config.GlobalScale ?? 1.0f;
 
-        var needUpdate = false;
-
-#if FLATPAK || OSX
-        if (Config.DoVersionCheck ?? false)
-        {
-            var versionCheckResult = UpdateCheck.CheckForUpdate().GetAwaiter().GetResult();
-
-            if (versionCheckResult.Success)
-                needUpdate = versionCheckResult.NeedUpdate;
-        }
-#endif
-
-        needUpdate = CoreEnvironmentSettings.IsUpgrade ? true : needUpdate;
-
         var launcherClientConfig = LauncherClientConfig.GetAsync().GetAwaiter().GetResult();
-        launcherApp = new LauncherApp(storage, needUpdate, launcherClientConfig.frontierUrl, launcherClientConfig.cutOffBootver);
+        launcherApp = new LauncherApp(storage, launcherClientConfig.frontierUrl, launcherClientConfig.cutOffBootver);
 
         Invalidate(20);
 
@@ -371,12 +360,23 @@ sealed class Program
             gd.SwapBuffers(gd.MainSwapchain);
         }
 
-        HttpClient.Dispose();
         // Clean up Veldrid resources
         gd.WaitForIdle();
         bindings.Dispose();
         cl.Dispose();
         gd.Dispose();
+
+        HttpClient.Dispose();
+
+        if (Patcher is not null)
+        {
+            Patcher.CancelAllDownloads();
+            Task.Run(async () =>
+            {
+                await PatchManager.UnInitializeAcquisition().ConfigureAwait(false);
+                Environment.Exit(0);
+            });
+        }
     }
 
     public static void CreateCompatToolsInstance()
@@ -513,4 +513,6 @@ sealed class Program
         ClearTools(tsbutton);
         ClearLogs(true);
     }
+
+    public static void ResetUIDCache(bool tsbutton = false) => launcherApp.UniqueIdCache.Reset();
 }
