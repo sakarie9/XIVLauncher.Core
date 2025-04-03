@@ -20,7 +20,7 @@
     <IsWindows
       Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows)))' == 'true'">
       true</IsWindows>
-    <IsOSX Condition="'$(RuntimeIdentifier)' == 'osx-x64' or '$(RuntimeIdentifier)' == 'osx-arm64'">true</IsOSX>
+    <IsOSX Condition="$([MSBuild]::IsOSPlatform('OSX'))">true</IsOSX>
     <IsLinux
       Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))' == 'true'">
       true</IsLinux>
@@ -127,6 +127,14 @@
     <Resource Remove="cimgui.dylib" />
     <Content Include="Resources/cimgui.dylib">
       <Link>cimgui.dylib</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(IsOSX)'=='true'">
+    <Resource Remove="libsdl2.dylib" />
+    <Content Include="Resources/libsdl2.dylib">
+      <Link>libsdl2.dylib</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
