@@ -56,6 +56,7 @@ public class UnixDalamudRunner : IDalamudRunner
             DalamudInjectorArgs.ClientLanguage((int)startInfo.Language),
             DalamudInjectorArgs.DelayInitialize(startInfo.DelayInitializeMs),
             DalamudInjectorArgs.TsPackB64(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(startInfo.TroubleshootingPackData))),
+            DalamudInjectorArgs.LauncherDirectory(startInfo.LauncherDirectory)
         };
 
         if (loadMethod == DalamudLoadMethod.ACLonly)
@@ -79,18 +80,34 @@ public class UnixDalamudRunner : IDalamudRunner
         if (output == null)
             throw new DalamudRunnerException("An internal Dalamud error has occured");
 
-        Console.WriteLine(output);
-
         new Thread(() =>
         {
             while (!dalamudProcess.StandardOutput.EndOfStream)
             {
-                var output = dalamudProcess.StandardOutput.ReadLine();
-                if (output != null)
-                    Console.WriteLine(output);
-            }
+                var tempOutput = dalamudProcess.StandardOutput.ReadLine();
 
+                if (tempOutput != null)
+                {
+                    Console.WriteLine(tempOutput);
+                    if (tempOutput.Contains("pid"))
+                    {
+                        output = tempOutput;
+                    }
+                }
+            }
         }).Start();
+
+        var totalWaitSeconds = 0;
+
+        while (!output.Contains("pid")) // make sure output is updated
+        {
+            Thread.Sleep(1000);
+            totalWaitSeconds += 1;
+            if (totalWaitSeconds > 30)
+                break;
+        }
+
+        Log.Information(output);
 
         try
         {
@@ -99,12 +116,13 @@ public class UnixDalamudRunner : IDalamudRunner
 
             if (unixPid == 0)
             {
-                Log.Error("Could not retrive Unix process ID, this feature currently requires a patched wine version");
+                Log.Error("Could not retrieve Unix process ID, this feature currently requires a patched wine version");
                 return null;
             }
 
             var gameProcess = Process.GetProcessById(unixPid);
-            Log.Verbose($"Got game process handle {gameProcess.Handle} with Unix pid {gameProcess.Id} and Wine pid {dalamudConsoleOutput.Pid}");
+            Log.Verbose(
+                $"Got game process handle {gameProcess.Handle} with Unix pid {gameProcess.Id} and Wine pid {dalamudConsoleOutput.Pid}");
             return gameProcess;
         }
         catch (JsonReaderException ex)

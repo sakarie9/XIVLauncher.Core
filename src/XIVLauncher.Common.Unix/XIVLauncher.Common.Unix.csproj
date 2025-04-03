@@ -20,7 +20,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\lib\FFXIVQuickLauncher\src\XIVLauncher.Common\XIVLauncher.Common.csproj" />
+      <ProjectReference Include="..\XIVLauncher.Common\XIVLauncher.Common.csproj" />
     </ItemGroup>
 
     <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='Release'">
@@ -42,8 +42,13 @@
         </Content>
     </ItemGroup>
 
+    <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+        <DefineConstants>$(DefineConstants);OSX;WINE_XIV_MACOS</DefineConstants>
+    </PropertyGroup>
+
     <ItemGroup>
         <!-- Custom steamworks, based on the chippy branch of Facepunch.Steamworks -->
         <PackageReference Include="goaaats.Steamworks" Version="2.3.4" />
+        <PackageReference Update="Microsoft.CodeAnalysis.NetAnalyzers" Version="9.0.0" />
     </ItemGroup>
 </Project>
