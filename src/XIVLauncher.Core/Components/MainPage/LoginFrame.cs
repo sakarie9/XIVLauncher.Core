@@ -1,8 +1,11 @@
 using System.Numerics;
 
+using Castle.Core.Internal;
+
 using ImGuiNET;
 
 using XIVLauncher.Common.Game;
+using XIVLauncher.Core.Accounts.Cred.CredProviders;
 using XIVLauncher.Core.Accounts.Secrets.Providers;
 using XIVLauncher.Core.Components.Common;
 
@@ -14,6 +17,7 @@ public class LoginFrame : Component
 
     private readonly Input loginInput;
     private readonly Combo areaCombo;
+    private readonly Combo loginTypeCombo;
     private bool showPasswordInput = false;
     private readonly Input passwordInput;
     // private readonly Checkbox oneTimePasswordCheckbox;
@@ -27,14 +31,22 @@ public class LoginFrame : Component
         get => this.loginInput.Value;
         set => this.loginInput.Value = value;
     }
-
-    public SdoArea? Area => SdoAreas.FirstOrDefault(area => area.AreaName == this.areaCombo.Value);
-
     public string Password
     {
         get => this.passwordInput.Value;
         set => this.passwordInput.Value = value;
     }
+
+    public SdoArea? Area => SdoAreas.FirstOrDefault(area => area.AreaName == this.areaCombo.Value);
+    public LoginType LoginType
+    {
+        get
+        {
+            var selectedIndex = Array.IndexOf(this.loginTypeCombo.Items, this.loginTypeCombo.Value);
+            return (LoginType)Enum.GetValues<LoginType>().GetValue(selectedIndex);
+        }
+    }
+
 
     public bool IsOtp
     {
@@ -65,7 +77,11 @@ public class LoginFrame : Component
     public LoginFrame(MainPage mainPage)
     {
         this.mainPage = mainPage;
-        this.areaCombo = new Combo("大区", SdoAreas.Select(area => area.AreaName).ToArray());
+        this.areaCombo = new Combo("大区", SdoAreas.Select(area => area.AreaName).ToArray(), defaultItem: Program.Config.SelectedServer ?? 0, onSelectChange:
+                                   (selectedServer) =>
+                                   {
+                                       Program.Config.SelectedServer = selectedServer;
+                                   });
         this.loginInput = new Input("账号", "请输入账号", new Vector2(12f, 0f), 128);
         this.passwordInput = new Input("密码", "请输入密码", new Vector2(12f, 0f), 1280, flags: ImGuiInputTextFlags.Password | ImGuiInputTextFlags.NoUndoRedo);
 
@@ -75,6 +91,17 @@ public class LoginFrame : Component
         // this.oneTimePasswordCheckbox = new Checkbox("Use one-time password");
 
         // this.useSteamServiceCheckbox = new Checkbox("Use steam service");
+        this.loginTypeCombo = new Combo("登录方式", Enum.GetNames(typeof(LoginType)).Where( // AutoLogin is not an initial login type
+                                            type => type != "AutoLoginSession").Select(
+                                            loginType => loginType switch
+        {
+            "SdoStatic" => "密码登录",
+            "SdoSlide" => "滑动登陆",
+            "SdoQrCode" => "扫码登录",
+            "WeGameToken" => "Wegame Token 登录",
+            "WeGameSid" => "Wegame SID 登录",
+            // "AutoLoginSession" => "自动登录"
+        }).ToArray(), defaultItem: 2);
 
         this.fastLoginCheckbox = new Checkbox("快速登陆");
 
@@ -127,8 +154,7 @@ public class LoginFrame : Component
                 this.passwordInput.Draw();
             }
 
-            // this.oneTimePasswordCheckbox.Draw();
-            // this.useSteamServiceCheckbox.Draw();
+            this.loginTypeCombo.Draw();
             this.fastLoginCheckbox.Draw();
 
             ImGui.Dummy(new Vector2(10));
@@ -206,10 +232,10 @@ public class LoginFrame : Component
 
             ImGui.PopStyleColor();
 
-            if (Program.Secrets is DummySecretProvider)
+            if (Program.AccountManager.CredProvider is NoCred)
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
-                ImGui.TextWrapped("Take care! No secrets provider is installed or configured. Passwords can't be saved.");
+                ImGui.TextWrapped("注意！未配置任何凭据提供程序。请注意密码安全。");
                 ImGui.PopStyleColor();
 
                 ImGui.Dummy(new Vector2(15));

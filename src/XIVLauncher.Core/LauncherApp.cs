@@ -117,6 +117,7 @@ public class LauncherApp : Component
 
     public AccountManager Accounts;
     public CommonUniqueIdCache UniqueIdCache;
+    public byte[]? qrBytes;
 
     private readonly MainPage mainPage;
     private readonly SettingsPage setPage;
@@ -131,7 +132,7 @@ public class LauncherApp : Component
     {
         this.Storage = storage;
 
-        this.Accounts = new AccountManager(this.Storage.GetFile("accounts.json"));
+        this.Accounts = new AccountManager();
         this.UniqueIdCache = new CommonUniqueIdCache(this.Storage.GetFile("uidCache.json"));
         this.Launcher = new Launcher(Program.Steam, UniqueIdCache, Program.CommonSettings, frontierUrl);
 

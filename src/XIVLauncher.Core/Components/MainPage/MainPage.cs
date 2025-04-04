@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
 
+using Castle.Core.Internal;
+
 using CheapLoc;
 
 using ImGuiNET;
@@ -34,6 +36,27 @@ public class MainPage : Page
     public SdoArea? Area;
 
     public bool IsLoggingIn { get; private set; }
+    
+
+    private string _loginMessage = "正在登录...";
+    public string LoginMessage
+    {
+        get => _loginMessage;
+        set
+        {
+            _loginMessage = value;
+        }
+    }
+    private CancellationTokenSource loginCts;
+    public void CancelLogin()
+    {
+        if (this.loginCts != null)
+        {
+            Log.Information("取消登陆");
+            this.loginCts.Cancel();
+        }
+    }
+    
 
     public MainPage(LauncherApp app)
         : base(app)
@@ -92,11 +115,9 @@ public class MainPage : Page
     private void SwitchAccount(XivAccount account, bool saveAsCurrent)
     {
         this.loginFrame.Username = account.UserName;
-        this.loginFrame.IsOtp = account.UseOtp;
-        this.loginFrame.IsSteam = account.UseSteamServiceAccount;
         this.loginFrame.IsAutoLogin = App.Settings.IsAutologin ?? false;
 
-        if (account.SavePassword)
+        if (!account.Password.IsNullOrEmpty())
             this.loginFrame.Password = account.Password;
 
         if (saveAsCurrent)
@@ -115,10 +136,12 @@ public class MainPage : Page
         if (this.IsLoggingIn)
             return;
 
-        this.App.StartLoading("Logging in...", canDisableAutoLogin: true);
+        this.App.StartLoading("正在登录...", canDisableAutoLogin: false);
 
         // if (Program.UsesFallbackSteamAppId && this.loginFrame.IsSteam)
         //     throw new Exception("Doesn't own Steam AppId on this account.");
+
+        this.loginCts = new CancellationTokenSource();
 
         Task.Run(async () =>
         {
@@ -144,8 +167,15 @@ public class MainPage : Page
             IsLoggingIn = true;
 
             App.Settings.IsAutologin = this.loginFrame.IsAutoLogin;
+            var loginType = this.loginFrame.LoginType;
 
-            var result = await Login(loginFrame.Username, loginFrame.Password, loginFrame.IsOtp, loginFrame.IsSteam, false, action).ConfigureAwait(false);
+            var result = await Login(
+                             loginType,
+                             this.loginFrame.Username,
+                             this.loginFrame.Password,
+                             this.loginFrame.IsAutoLogin,
+                    loginType == LoginType.WeGameSid || loginType == LoginType.WeGameToken,
+                             action).ConfigureAwait(false);
 
             if (result)
             {
@@ -163,7 +193,7 @@ public class MainPage : Page
         });
     }
 
-    public async Task<bool> Login(string username, string password, bool isOtp, bool isSteam, bool doingAutoLogin, LoginAction action)
+    public async Task<bool> Login(LoginType loginType, string username, string password, bool doingAutoLogin, bool isWegame, LoginAction action)
     {
         if (action == LoginAction.Fake)
         {
@@ -194,54 +224,158 @@ public class MainPage : Page
 
         if (!bootRes)
             return false;
-
-        var otp = string.Empty;
-        
-        if (isOtp && App.UniqueIdCache.HasValidCache(username) && App.Settings.IsUidCacheEnabled == false)
-            Program.ResetUIDCache();
-
-        if (isOtp && !App.UniqueIdCache.HasValidCache(username))
+/*
+        if (Area == null || Area.Areaid == "-1")
         {
-            App.AskForOtp();
-            otp = App.WaitForOtp();
-
-            // Make sure we are loading again
-            App.State = LauncherApp.LauncherState.Loading;
-            Program.Invalidate(10);
+            App.ShowMessageBlocking(
+                "未能获取到服务器列表,无法登陆",
+                "XIVLauncherCN Error");
+            return false;
         }
+*/
+        var finalLoginType = loginType;
+        var serect = string.Empty;
+        
+        var accountType = loginType switch
+        {
+            LoginType.WeGameSid => XivAccountType.WeGameSid,
+            LoginType.WeGameToken => XivAccountType.WeGame,
+            _ => XivAccountType.Sdo
+        };
+        
+        
+        try
+        {
+            var savedAccount = this.App.Accounts.Accounts.FirstOrDefault(x => x.UserName == username && x.AccountType == accountType);
+            switch (loginType)
+            {
+                case LoginType.SdoStatic:
+                    if (!password.IsNullOrEmpty())
+                    {
+                        serect = password;
+                    }
+                    else if (savedAccount != null)
+                    {
+                        serect = await this.App.Accounts.Decrypt(savedAccount.Password).ConfigureAwait(false);
+                    }
+                    ArgumentException.ThrowIfNullOrEmpty(username, "静态登录用户名");
+                    ArgumentException.ThrowIfNullOrEmpty(serect, "静态登录密码");
+                    finalLoginType = LoginType.SdoStatic;
+                    break;
+                case LoginType.WeGameSid:
+                    doingAutoLogin = true;
+                    if (savedAccount != null)
+                    {
+                        serect = await this.App.Accounts.Decrypt(savedAccount.TestSID).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        throw new Exception("获取WeGame登录信息失败");
+                    }
+                    finalLoginType = LoginType.WeGameSid;
+                    break;
+                case LoginType.WeGameToken:
+                    if (password.IsNullOrEmpty())
+                    {
+                        serect = await this.App.Accounts.CredProvider.Decrypt(savedAccount.AutoLoginSessionKey);
+                        finalLoginType = LoginType.AutoLoginSession;
+                    }
+                    if (serect.IsNullOrEmpty())
+                    {
+                        serect = password;
+                        finalLoginType = LoginType.WeGameToken;
+                    }
+                    ArgumentException.ThrowIfNullOrEmpty(serect, "自动登录密钥或者Token");
+                    break;
+                case LoginType.SdoSlide:
+                    if (savedAccount != null && doingAutoLogin)
+                    {
+                        serect = await this.App.Accounts.Decrypt(savedAccount.AutoLoginSessionKey);
+                        finalLoginType = LoginType.AutoLoginSession;
+                    }
+                    if (serect.IsNullOrEmpty())
+                    {
+                        finalLoginType = LoginType.SdoSlide;
+                    }
+                    ArgumentException.ThrowIfNullOrEmpty(username, "一键滑动登录用户名");
+                    break;
+                case LoginType.SdoQrCode:
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (ex is ArgumentException argEx)
+            {
+                Log.Error(ex, "Failed to encrypt text");
+                App.ShowMessageBlocking($"{argEx.ParamName}不能为空", "XIVLauncherCN Error");
+                return false;
+            }
+            throw;
+        }
+        var loginResult = await TryLoginToGame(finalLoginType, loginType, username, serect, doingAutoLogin, action).ConfigureAwait(false);
 
-        if (otp == null)
+        if (loginResult == null)
             return false;
 
-        PersistAccount(username, password, isOtp, isSteam);
+        loginResult.Area = Area;
+        if (loginResult.State == Launcher.LoginState.NeedsPatchGame && action != LoginAction.Repair)
+        {
+            action = LoginAction.GameNoLaunch;
+        }
+        if (action != LoginAction.GameNoLaunch)
+        {
+            if (loginResult.State == Launcher.LoginState.Ok)
+            {
+                var accountToSave = new XivAccount()
+                {
+                    AutoLogin = loginType == LoginType.WeGameSid || doingAutoLogin,
+                    LoginAccount = loginResult.OauthLogin.InputUserId,
+                    SndaId = loginResult.OauthLogin.SndaId,
+                };
 
-        var loginResult = await TryLoginToGame(username, password, otp, isSteam, action).ConfigureAwait(false);
+                accountToSave.AccountType = loginType switch
+                {
+                    LoginType.WeGameSid => XivAccountType.WeGameSid,
+                    LoginType.WeGameToken => XivAccountType.WeGame,
+                    LoginType.SdoStatic or LoginType.SdoSlide or LoginType.SdoQrCode => XivAccountType.Sdo
+                };
 
-        return await TryProcessLoginResult(loginResult, isSteam, action).ConfigureAwait(false);
+                accountToSave.AreaName = Area.AreaName;
+
+                if (doingAutoLogin && accountToSave.AccountType != XivAccountType.WeGameSid)
+                {
+                    accountToSave.AutoLoginSessionKey = await this.App.Accounts.Encrypt(loginResult.OauthLogin.AutoLoginSessionKey);
+                    if (finalLoginType == LoginType.SdoStatic)
+                    {
+                        accountToSave.Password = await this.App.Accounts.Encrypt(serect);
+                    }
+                }
+
+                if (accountToSave.AccountType == XivAccountType.WeGameSid)
+                {
+                    accountToSave.TestSID = await this.App.Accounts.Encrypt(serect);
+                    //accountToSave.TestSID = await AccountManager.CredProvider.Encrypt("password");
+                }
+                accountToSave.GenerateId();
+                this.App.Accounts.AddAccount(accountToSave);
+                this.App.Accounts.CurrentAccount = accountToSave;
+                this.App.Accounts.Save();
+            }
+        }
+            
+        Log.Information("[LR] {State} {NumPatches} {Playable}",
+                        loginResult.State,
+                        loginResult.PendingPatches?.Length,
+                        loginResult.OauthLogin?.Playable);
+
+        await this.App.Accounts.CredProvider.ClearCache();
+
+        return await TryProcessLoginResult(loginResult, false, action).ConfigureAwait(false);
     }
 
-    private async Task<Launcher.LoginResult> TryLoginToGame(string username, string password, string otp, bool isSteam, LoginAction action)
+    private async Task<Launcher.LoginResult> TryLoginToGame(LoginType type, LoginType fallbackLoginType, string username, string secret, bool autoLogin, LoginAction action)
     {
-        // #if !DEBUG
-        //         bool? gateStatus = null;
-        //         try
-        //         {
-        //             // TODO: Also apply the login status fix here
-        //             var gate = await App.Launcher.GetGateStatus(App.Settings.ClientLanguage ?? ClientLanguage.English).ConfigureAwait(false);
-        //             gateStatus = gate.Status;
-        //         }
-        //         catch (Exception ex)
-        //         {
-        //             Log.Error(ex, "Could not obtain gate status");
-        //         }
-
-        //         if (gateStatus == null)
-        //         {
-        //             App.ShowMessageBlocking("Login servers could not be reached or maintenance is in progress. This might be a problem with your connection.");
-        //             return null!;
-        //         }
-        // #endif
-
         try
         {
             Area = loginFrame.Area;
@@ -254,8 +388,53 @@ public class MainPage : Page
             var checkResult = await App.Launcher.CheckGameUpdate(Area, gamePath, action == LoginAction.Repair);
             if (checkResult.State == Launcher.LoginState.NeedsPatchGame || action == LoginAction.Repair)
                 return checkResult;
+            
+            if (type == LoginType.AutoLoginSession)
+            {
+                try
+                {
+                    return await this.App.Launcher.LoginBySessionKey(username, autoLoginSessionKey: secret).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    Log.Error("LoginBySessionKey failed, fallback to {fallbackLoginType}:{ex}", fallbackLoginType, e);
+                    type = fallbackLoginType;
+                }
+            }
+            
+
+            switch (type)
+            {
+                case LoginType.SdoStatic:
+                    return await this.App.Launcher.LoginBySdoStatic(username, password: secret).ConfigureAwait(false);
+
+                case LoginType.SdoSlide:
+                    return await this.App.Launcher.LoginBySlide(username, autoLogin, this.loginCts, (code) =>
+                    {
+                        Log.Information($"叨鱼确认码:{code}");
+                        this.LoginMessage = $"确认码: {code}";
+                        this.App.StartLoading("正在登录...",this.LoginMessage);
+                    }).ConfigureAwait(false);
+
+                case LoginType.SdoQrCode:
+                    return await this.App.Launcher.LoginByScanQrCode(autoLogin, this.loginCts, (qrBytes) =>
+                    {
+                        this.App.qrBytes = qrBytes;
+                        this.App.AskForQr();
+                    }).ConfigureAwait(false);
+
+                case LoginType.WeGameToken:
+                    return await this.App.Launcher.LoginByWeGameToken(username, token: secret, autoLogin).ConfigureAwait(false);
+
+                case LoginType.WeGameSid:
+                    return await this.App.Launcher.LoginBySid(username, sid: secret).ConfigureAwait(false);
+
+                default:
+                    throw new Exception($"Unknown LoginType:{type}");
+            }
+            /*
             string? autoLoginSessionKey = null;
-            var autoLogin = string.IsNullOrEmpty(password) && this.loginFrame.IsAutoLogin;
+            var autoLogin = string.IsNullOrEmpty(secret) && this.loginFrame.IsAutoLogin;
             try
             {
                 if (autoLogin)
@@ -268,9 +447,9 @@ public class MainPage : Page
                 Log.Error(ex, "Could not get auto login session key");
             }
 
-            return await App.Launcher.LoginSdo(
+            return await App.Launcher.Login(
                 username,
-                password,
+                secret,
                 (state, msg) =>
                 {
                     Log.Information(msg);
@@ -294,6 +473,7 @@ public class MainPage : Page
                 autoLogin,
                 autoLoginSessionKey
             ).ConfigureAwait(false);
+            */
         }
         catch (Exception ex)
         {
@@ -420,20 +600,19 @@ public class MainPage : Page
 
         Debug.Assert(loginResult.State == Launcher.LoginState.Ok);
 
-        if (loginResult.State == Launcher.LoginState.Ok
-            && App.Accounts.CurrentAccount != null
-            && !string.IsNullOrEmpty(loginResult.OauthLogin?.AutoLoginSessionKey))
-        {
-            App.Accounts.CurrentAccount.AutoLoginSessionKey = loginResult.OauthLogin.AutoLoginSessionKey;
-            App.Accounts.Save();
-        }
-
         while (true)
         {
             List<Exception> exceptions = new();
 
             try
             {
+                if (loginResult.OauthLogin.SessionId.IsNullOrEmpty() || loginResult.OauthLogin.SndaId.IsNullOrEmpty())
+                {
+                    Log.Error($"SID或SNDAID为空，取消登录");
+                    App.ShowMessageBlocking("SID或SNDAID为空，取消登录");
+                    return false;
+                }
+
                 using var process = await StartGameAndAddon(loginResult, isSteam, action == LoginAction.GameNoDalamud, action == LoginAction.GameNoPlugins, action == LoginAction.GameNoThirdparty).ConfigureAwait(false);
 
                 if (process is null)
@@ -443,48 +622,10 @@ public class MainPage : Page
                 {
                     throw new InvalidOperationException("Game exited with non-zero exit code");
 
-                    /*
-                    switch (new CustomMessageBox.Builder()
-                            .WithTextFormatted(
-                                Loc.Localize("LaunchGameNonZeroExitCode",
-                                    "It looks like the game has exited with a fatal error. Do you want to relaunch the game?\n\nExit code: 0x{0:X8}"),
-                                (uint)process.ExitCode)
-                            .WithImage(MessageBoxImage.Exclamation)
-                            .WithShowHelpLinks(true)
-                            .WithShowDiscordLink(true)
-                            .WithShowNewGitHubIssue(true)
-                            .WithButtons(MessageBoxButton.YesNoCancel)
-                            .WithDefaultResult(MessageBoxResult.Yes)
-                            .WithCancelResult(MessageBoxResult.No)
-                            .WithYesButtonText(Loc.Localize("LaunchGameRelaunch", "_Relaunch"))
-                            .WithNoButtonText(Loc.Localize("LaunchGameClose", "_Close"))
-                            .WithCancelButtonText(Loc.Localize("LaunchGameDoNotAskAgain", "_Don't ask again"))
-                            .WithParentWindow(_window)
-                            .Show())
-                    {
-                        case MessageBoxResult.Yes:
-                            continue;
-
-                        case MessageBoxResult.No:
-                            return true;
-
-                        case MessageBoxResult.Cancel:
-                            App.Settings.TreatNonZeroExitCodeAsFailure = false;
-                            return true;
-                    }
-                    */
                 }
 
                 return true;
             }
-            /*
-            catch (AggregateException ex)
-            {
-                Log.Error(ex, "StartGameAndError resulted in one or more exceptions.");
-
-                exceptions.Add(ex.Flatten().InnerException);
-            }
-            */
             catch (Exception ex)
             {
                 Log.Error(ex, "StartGameAndError resulted in an exception.");
@@ -493,167 +634,6 @@ public class MainPage : Page
                 throw;
             }
 
-            /*
-            var builder = new CustomMessageBox.Builder()
-                          .WithImage(MessageBoxImage.Error)
-                          .WithShowHelpLinks(true)
-                          .WithShowDiscordLink(true)
-                          .WithShowNewGitHubIssue(true)
-                          .WithButtons(MessageBoxButton.YesNo)
-                          .WithDefaultResult(MessageBoxResult.No)
-                          .WithCancelResult(MessageBoxResult.No)
-                          .WithYesButtonText(Loc.Localize("LaunchGameRetry", "_Try again"))
-                          .WithNoButtonText(Loc.Localize("LaunchGameClose", "_Close"))
-                          .WithParentWindow(_window);
-
-            //NOTE(goat): This HAS to handle all possible exceptions from StartGameAndAddon!!!!!
-            List<string> summaries = new();
-            List<string> actionables = new();
-            List<string> descriptions = new();
-
-            foreach (var exception in exceptions)
-            {
-                switch (exception)
-                {
-                    case GameExitedException:
-                        var count = 0;
-
-                        foreach (var processName in new string[] { "ffxiv_dx11", "ffxiv" })
-                        {
-                            foreach (var process in Process.GetProcessesByName(processName))
-                            {
-                                count++;
-                                process.Dispose();
-                            }
-                        }
-
-                        if (count >= 2)
-                        {
-                            summaries.Add(Loc.Localize("MultiboxDeniedWarningSummary",
-                                "You can't launch more than two instances of the game by default."));
-                            actionables.Add(string.Format(
-                                Loc.Localize("MultiboxDeniedWarningActionable",
-                                    "Please check if there is an instance of the game that did not close correctly. (Detected: {0})"),
-                                count));
-                            descriptions.Add(null);
-
-                            builder.WithButtons(MessageBoxButton.YesNoCancel)
-                                   .WithDefaultResult(MessageBoxResult.Yes)
-                                   .WithCancelButtonText(Loc.Localize("LaunchGameKillThenRetry", "_Kill then try again"));
-                        }
-                        else
-                        {
-                            summaries.Add(Loc.Localize("GameExitedPrematurelyErrorSummary",
-                                "XIVLauncher could not detect that the game started correctly."));
-                            actionables.Add(Loc.Localize("GameExitedPrematurelyErrorActionable",
-                                "This may be a temporary issue. Please try restarting your PC. It is possible that your game installation is not valid."));
-                            descriptions.Add(null);
-                        }
-
-                        break;
-
-                    case BinaryNotPresentException:
-                        summaries.Add(Loc.Localize("BinaryNotPresentErrorSummary",
-                            "Could not find the game executable."));
-                        actionables.Add(Loc.Localize("BinaryNotPresentErrorActionable",
-                            "This might be caused by your antivirus. You may have to reinstall the game."));
-                        descriptions.Add(null);
-                        break;
-
-                    case IOException:
-                        summaries.Add(Loc.Localize("LoginIoErrorSummary",
-                            "Could not locate game data files."));
-                        summaries.Add(Loc.Localize("LoginIoErrorActionable",
-                            "This may mean that the game path set in XIVLauncher isn't preset, e.g. on a disconnected drive or network storage. Please check the game path in the XIVLauncher settings."));
-                        descriptions.Add(exception.ToString());
-                        break;
-
-                    case Win32Exception win32Exception:
-                        summaries.Add(string.Format(
-                            Loc.Localize("UnexpectedErrorSummary",
-                                "Unexpected error has occurred. ({0})"),
-                            $"0x{(uint)win32Exception.HResult:X8}: {win32Exception.Message}"));
-                        actionables.Add(Loc.Localize("UnexpectedErrorActionable",
-                            "Please report this error."));
-                        descriptions.Add(exception.ToString());
-                        break;
-
-                    default:
-                        summaries.Add(string.Format(
-                            Loc.Localize("UnexpectedErrorSummary",
-                                "Unexpected error has occurred. ({0})"),
-                            exception.Message));
-                        actionables.Add(Loc.Localize("UnexpectedErrorActionable",
-                            "Please report this error."));
-                        descriptions.Add(exception.ToString());
-                        break;
-                }
-            }
-
-            if (exceptions.Count == 1)
-            {
-                builder.WithText($"{summaries[0]}\n\n{actionables[0]}")
-                       .WithDescription(descriptions[0]);
-            }
-            else
-            {
-                builder.WithText(Loc.Localize("MultipleErrors", "Multiple errors have occurred."));
-
-                for (var i = 0; i < summaries.Count; i++)
-                {
-                    builder.WithAppendText($"\n{i + 1}. {summaries[i]}\n    => {actionables[i]}");
-                    if (string.IsNullOrWhiteSpace(descriptions[i]))
-                        continue;
-                    builder.WithAppendDescription($"########## Exception {i + 1} ##########\n{descriptions[i]}\n\n");
-                }
-            }
-
-            if (descriptions.Any(x => x != null))
-                builder.WithAppendSettingsDescription("Login");
-
-
-            switch (builder.Show())
-            {
-                case MessageBoxResult.Yes:
-                    continue;
-
-                case MessageBoxResult.No:
-                    return false;
-
-                case MessageBoxResult.Cancel:
-                    for (var pass = 0; pass < 8; pass++)
-                    {
-                        var allKilled = true;
-
-                        foreach (var processName in new string[] { "ffxiv_dx11", "ffxiv" })
-                        {
-                            foreach (var process in Process.GetProcessesByName(processName))
-                            {
-                                allKilled = false;
-
-                                try
-                                {
-                                    process.Kill();
-                                }
-                                catch (Exception ex2)
-                                {
-                                    Log.Warning(ex2, "Could not kill process (PID={0}, name={1})", process.Id, process.ProcessName);
-                                }
-                                finally
-                                {
-                                    process.Dispose();
-                                }
-                            }
-                        }
-
-                        if (allKilled)
-                            break;
-                    }
-
-                    Task.Delay(1000).Wait();
-                    continue;
-            }
-            */
         }
     }
 
@@ -996,7 +976,7 @@ public class MainPage : Page
 
         return launchedProcess!;
     }
-
+/*
     private void PersistAccount(string username, string password, bool isOtp, bool isSteam)
     {
         if (App.Accounts.CurrentAccount != null && App.Accounts.CurrentAccount.UserName.Equals(username, StringComparison.Ordinal) &&
@@ -1020,6 +1000,7 @@ public class MainPage : Page
             App.Accounts.CurrentAccount = accountToSave;
         }
     }
+    */
 
     private async Task<bool> HandleBootCheck()
     {

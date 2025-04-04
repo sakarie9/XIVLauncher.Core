@@ -1,5 +1,6 @@
 using ImGuiNET;
 using XIVLauncher.Common;
+using XIVLauncher.Core.Accounts.Cred;
 
 namespace XIVLauncher.Core.Components.SettingsPage.Tabs;
 
@@ -39,6 +40,13 @@ public class SettingsTabGame : SettingsTab
             CheckVisibility = () => !CoreEnvironmentSettings.IsSteamCompatTool,
         },
         new SettingsEntry<bool>("Use Experimental UID Cache", "Tries to save your login token for the next start. Can result in launching with expired sessions.", () => Program.Config.IsUidCacheEnabled ?? false, x => Program.Config.IsUidCacheEnabled = x),
+        new SettingsEntry<CredType>("Credential Manager", "Select the credential manager for accounts.", () => Program.Config.CredType ?? CredType.CredentialManager,
+                                    x =>
+                                    {
+                                        Program.Config.CredType = x;
+                                        Program.AccountManager.ChangeCredType(x);
+                                    }),
+
     };
 
     public override string Title => "Game";

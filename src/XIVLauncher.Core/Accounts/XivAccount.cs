@@ -1,118 +1,152 @@
-using Newtonsoft.Json;
+using System.Net;
 using Newtonsoft.Json.Linq;
+using System.Diagnostics;
 
-using Serilog;
+using SQLite;
 
-namespace XIVLauncher.Core.Accounts;
-
-public class XivAccount
+namespace XIVLauncher.Core.Accounts
 {
-    [JsonIgnore]
-    public string Id => $"{UserName}-{UseOtp}-{UseSteamServiceAccount}";
-
-    public override string ToString() => Id;
-
-    public string UserName { get; private set; }
-
-    [JsonIgnore]
-    public string Password
+    public enum XivAccountType
     {
-        get
-        {
-            if (string.IsNullOrEmpty(UserName))
-                return string.Empty;
+        Sdo,
+        WeGame,
+        WeGameSid
+    }
+    public class XivAccount : IEquatable<XivAccount>
+    {
+        //public string Id => $"{UserName}-{UseOtp}-{UseSteamServiceAccount}";
 
-            var credentials = Program.Secrets.GetPassword(UserName);
-            return credentials ?? string.Empty;
-        }
-        set
+        //public override string ToString() => Id;
+
+        /*
+         * 目前有如下几种登录方式:
+         * 盛趣账密     LoginAccount Password
+         * 叨鱼扫码     LoginAccount AutoLoginSessionKey
+         * 叨鱼滑动     LoginAccount AutoLoginSessionKey
+         * WG手动抓包   ThirdLoginAccount  Token
+         * WG抓SID     SndaId&AreaId SessionID
+         * 
+         * SndaId XivAccountType:WeGame ThirdLoginAccount (AutoLoginSessionKey)
+         * SndaId XivAccountType:WeGameSid AreaName (SessionID)
+         * SndaId XivAccountType:Sdo LoginAccount (AutoLoginSessionKey Password)
+         */
+        
+        // public int index { get; set; }
+        
+        [Unique]
+        [PrimaryKey]
+        public string Id { get; set; }
+
+        public static XivAccount CreateAccount(XivAccountType accountType, string sndaId, string account = null, string areaName = null, string sessionId = null)
         {
-            if (!string.IsNullOrEmpty(value))
+            var newAccount = new XivAccount();
+            Debug.Assert(sndaId != null);
+            newAccount.AccountType = accountType;
+            newAccount.SndaId = sndaId;
+            switch (accountType)
             {
-                Program.Secrets.SavePassword(UserName, value);
+                case XivAccountType.WeGameSid:
+                    Debug.Assert(areaName != null);
+                    Debug.Assert(account == null);
+                    newAccount.SndaId = sndaId;
+                    newAccount.AreaName = areaName;
+                    newAccount.TestSID = sessionId;
+                    break;
+                case XivAccountType.Sdo:
+                case XivAccountType.WeGame:
+                    Debug.Assert(account != null);
+                    newAccount.LoginAccount = account;
+                    break;
             }
+            newAccount.GenerateId();
+            return newAccount;
         }
-    }
 
-    [JsonIgnore]
-    public string AutoLoginSessionKey
-    {
-        get
+        public void GenerateId()
         {
-            if (string.IsNullOrEmpty(UserName))
-                return string.Empty;
-
-            var credentials = Program.Secrets.GetAutoLoginSessionKey(UserName);
-            return credentials ?? string.Empty;
+            this.Id = $"{this.UserName}|{this.AccountType}";
         }
-        set
+
+        public string SndaId { get; set; }
+        // for Account Manager
+        [Ignore]
+        public string DisplayName
         {
-            if (!string.IsNullOrEmpty(value))
+            get
             {
-                Program.Secrets.SaveAutoLoginSessionKey(UserName, value);
+                if (UserDefinedName is not null)
+                    return UserDefinedName;
+                return this.UserName;
             }
+            private set { }
         }
-    }
 
-    public bool SavePassword { get; set; }
-    public bool UseSteamServiceAccount { get; set; }
-    public bool UseOtp { get; set; }
+        // for Input Box
+        [Ignore]
+        public string UserName
+        {
+            get
+            {
+                if (AccountType == XivAccountType.Sdo || AccountType == XivAccountType.WeGame)
+                    return LoginAccount;
+                else
+                    return SndaId.ToString();
+            }
+            private set { }
+        }
+        public string UserDefinedName { get; set; }
+        public XivAccountType AccountType { get; set; }
+        public string LoginAccount { get; set; }
 
-    public string ChosenCharacterName = string.Empty;
-    public string ChosenCharacterWorld = string.Empty;
-    public string ThumbnailUrl = string.Empty;
+        public string AreaName { get; set; }
 
-    public string LastSuccessfulOtp = string.Empty;
+        public bool AutoLogin { get; set; }
 
-    public XivAccount(string userName)
-    {
-        UserName = userName.ToLower();
-    }
+        // Should be encrypted
+        public string AutoLoginSessionKey { get; set; }
+        public string Password { get; set; }
+        public string TestSID { get; set; }
 
-    public string? FindCharacterThumb()
-    {
-        return null;
-        if (string.IsNullOrEmpty(ChosenCharacterName) || string.IsNullOrEmpty(ChosenCharacterWorld))
+        [Ignore]
+        public bool IsWeGame => (this.AccountType != XivAccountType.Sdo);
+        [Ignore]
+        public string ThumbnailUrl { get; set; }
+        [Ignore]
+        public string ChosenCharacterName { get; set; }
+        [Ignore]
+        public string ChosenCharacterWorld { get; set; }
+
+        public override int GetHashCode()
+        {
+            return (UserName, AccountType).GetHashCode();
+        }
+
+        public bool Equals(XivAccount other)
+        {
+            return this.GetHashCode() == other.GetHashCode();
+        }
+
+        public string FindCharacterThumb()
+        {
             return null;
-
-        try
-        {
-            dynamic searchResponse = GetCharacterSearch(ChosenCharacterName, ChosenCharacterWorld)
-                                     .GetAwaiter().GetResult();
-
-            if (searchResponse.Results.Count > 1) //If we get more than one match from XIVAPI
-            {
-                foreach (var accountInfo in searchResponse.Results)
-                {
-                    //We have to check with it all lower in case they type their character name LiKe ThIsLoL. The server XIVAPI returns also contains the DC name, so let's just do a contains on the server to make it easy.
-                    if (accountInfo.Name.Value.ToLower() == ChosenCharacterName.ToLower() && accountInfo.Server.Value.ToLower().Contains(ChosenCharacterWorld.ToLower()))
-                    {
-                        return accountInfo.Avatar.Value;
-                    }
-                }
-            }
-
-            return searchResponse.Results.Count > 0 ? (string)searchResponse.Results[0].Avatar : null;
         }
-        catch (Exception ex)
+
+        private const string URL = "https://xivapi.com/";
+
+        public static async Task<JObject> GetCharacterSearch(string name, string world)
         {
-            Log.Information(ex, "Couldn't download character search");
-
-            return null;
+            return await Get("character/search" + $"?name={name}&server={world}");
         }
-    }
 
-    private const string URL = "https://xivapi.com/";
+        public static async Task<dynamic> Get(string endpoint)
+        {
+            using var client = new WebClient();
 
-    public static async Task<JObject> GetCharacterSearch(string name, string world)
-    {
-        return await Get("character/search" + $"?name={name}&server={world}").ConfigureAwait(false);
-    }
+            var result = await client.DownloadStringTaskAsync(URL + endpoint);
 
-    public static async Task<dynamic> Get(string endpoint)
-    {
-        var result = await Program.HttpClient.GetStringAsync(URL + endpoint).ConfigureAwait(false);
-        var parsedObject = JObject.Parse(result);
-        return parsedObject;
+            var parsedObject = JObject.Parse(result);
+
+            return parsedObject;
+        }
     }
 }

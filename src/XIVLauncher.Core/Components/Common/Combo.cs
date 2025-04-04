@@ -24,11 +24,11 @@ public class Combo : Component
         }
     }
 
-    public event Action? Click;
+    private Action<int>? _onSelectChange;
 
     public int? Width { get; set; }
 
-    public Combo(string label, string[] items, bool isEnabled = true, Vector4? color = null, Vector4? hoverColor = null, Vector4? textColor = null)
+    public Combo(string label, string[] items, bool isEnabled = true, Vector4? color = null, Vector4? hoverColor = null, Vector4? textColor = null, int defaultItem = 0, Action<int> onSelectChange = null)
     {
         Label = label;
         Items = items;
@@ -36,7 +36,8 @@ public class Combo : Component
         Color = color ?? ImGuiColors.Blue;
         HoverColor = hoverColor ?? ImGuiColors.BlueShade3;
         TextColor = textColor ?? ImGuiColors.DalamudWhite;
-        _currentItem = Program.Config.SelectedServer ?? 0;
+        _currentItem = defaultItem;
+        _onSelectChange = onSelectChange;
     }
 
     public override void Draw()
@@ -58,8 +59,7 @@ public class Combo : Component
         
         if (ImGui.Combo($"###{Label}", ref _currentItem, Items, Items.Length))
         {
-            this.Click?.Invoke();
-            Program.Config.SelectedServer = _currentItem;
+            this._onSelectChange?.Invoke(_currentItem);
         }
 
         if (!IsEnabled)

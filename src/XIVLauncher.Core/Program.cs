@@ -23,6 +23,8 @@ using XIVLauncher.Common.Unix;
 using XIVLauncher.Common.Unix.Compatibility;
 using XIVLauncher.Common.Util;
 using XIVLauncher.Common.Windows;
+using XIVLauncher.Core.Accounts;
+using XIVLauncher.Core.Accounts.Cred;
 using XIVLauncher.Core.Accounts.Secrets;
 using XIVLauncher.Core.Accounts.Secrets.Providers;
 using XIVLauncher.Core.Components.LoadingPage;
@@ -47,7 +49,8 @@ sealed class Program
     public static DalamudUpdater DalamudUpdater { get; private set; } = null!;
     public static DalamudOverlayInfoProxy DalamudLoadInfo { get; private set; } = null!;
     public static CompatibilityTools CompatibilityTools { get; private set; } = null!;
-    public static ISecretProvider Secrets { get; private set; } = null!;
+
+    public static AccountManager AccountManager => launcherApp.Accounts;
 
     private static readonly Lazy<HttpClient> _httpClient = new Lazy<HttpClient>(() =>
     {
@@ -210,8 +213,6 @@ sealed class Program
 
         SetupLogging(mainArgs);
         LoadConfig(storage);
-
-        Secrets = GetSecretProvider(storage);
 
         Loc.SetupWithFallbacks();
 
@@ -412,39 +413,8 @@ sealed class Program
     {
         window.Visible = false;
     }
-
-    private static ISecretProvider GetSecretProvider(Storage storage)
-    {
-        var secretsFilePath = Environment.GetEnvironmentVariable("XL_SECRETS_FILE_PATH") ?? "secrets.json";
-
-        var envVar = Environment.GetEnvironmentVariable("XL_SECRET_PROVIDER") ?? "KEYRING";
-        envVar = envVar.ToUpper();
-
-        switch (envVar)
-        {
-            case "FILE":
-                return new FileSecretProvider(storage.GetFile(secretsFilePath));
-
-            case "KEYRING":
-                {
-                    var keyChain = new KeychainSecretProvider();
-
-                    if (!keyChain.IsAvailable)
-                    {
-                        Log.Error("An org.freedesktop.secrets provider is not available - no secrets will be stored");
-                        return new DummySecretProvider();
-                    }
-
-                    return keyChain;
-                }
-
-            case "NONE":
-                return new DummySecretProvider();
-
-            default:
-                throw new ArgumentException($"Invalid secret provider: {envVar}");
-        }
-    }
+    
+    
 
     public static void ClearSettings(bool tsbutton = false)
     {

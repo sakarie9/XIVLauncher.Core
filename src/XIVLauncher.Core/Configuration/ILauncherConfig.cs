@@ -3,6 +3,7 @@ using XIVLauncher.Common.Addon;
 using XIVLauncher.Common.Dalamud;
 using XIVLauncher.Common.Game.Patch.Acquisition;
 using XIVLauncher.Common.Unix.Compatibility;
+using XIVLauncher.Core.Accounts.Cred;
 
 namespace XIVLauncher.Core.Configuration;
 
@@ -46,6 +47,8 @@ public interface ILauncherConfig
     public int? SelectedServer { get; set; }
 
     public bool? IsIgnoringSteam { get; set; }
+    
+    public CredType? CredType { get; set; }
 
     #region Patching
 

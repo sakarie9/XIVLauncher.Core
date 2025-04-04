@@ -11,8 +11,6 @@ public class QrEntryPage : Page
 
     public bool Cancelled { get; private set; }
 
-    // private OtpListener? qrListener;
-    private readonly string qrPath = Path.Combine(Environment.CurrentDirectory, "Resources", "QR.png");
     private TextureWrap qrImage;
 
     public QrEntryPage(LauncherApp app)
@@ -40,16 +38,10 @@ public class QrEntryPage : Page
             // center text in window
             ImGuiHelpers.CenteredText("请扫描二维码");
 
-            if (File.Exists(qrPath))
+            if (this.App.qrBytes != null)
             {
                 ImGui.Dummy(new Vector2(10, 10));
-                FileInfo fileInfo = new FileInfo(qrPath);
-                var data = new byte[fileInfo.Length];
-
-                using (FileStream fs = fileInfo.OpenRead())
-                {
-                    fs.Read(data, 0, data.Length);
-                }
+                var data = this.App.qrBytes;
 
                 qrImage = TextureWrap.Load(data);
                 var bPos = ImGui.GetWindowPos();
