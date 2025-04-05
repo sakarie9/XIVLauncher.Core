@@ -1,5 +1,4 @@
 using System.Text;
-using System.Net;
 
 using KeySharp;
 
@@ -86,22 +85,31 @@ public class CredentialManager : ICredProvider
         }
         catch (Exception)
         {
-            Log.Warning($"Could not retrieve password for {Cred.Account}");
+            Log.Error($"Could not retrieve password for {Cred.Account}");
         }
         if (credentialsPassword != null)
         {
             return credentialsPassword;
         }
+        
+        // If credential is null, create a new one and save
         try
         {
             Keyring.DeletePassword(Cred.PackageName, SERVICE, Cred.Account);
         }
         catch (Exception)
         {
-            // ignored
+            Log.Error($"Could not delete password for {Cred.Account}");
         }
         var password = EncryptionHelper.GetRandomHexString(128);
-        Keyring.SetPassword(Cred.PackageName, SERVICE, Cred.Account, password);
+        try
+        {
+            Keyring.SetPassword(Cred.PackageName, SERVICE, Cred.Account, password);
+        }
+        catch (Exception)
+        {
+            Log.Error($"Could not set new password for {Cred.Account}");
+        }
         return password;
     }
 

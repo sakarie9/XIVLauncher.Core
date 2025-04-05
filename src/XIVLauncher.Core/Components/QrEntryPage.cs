@@ -1,6 +1,10 @@
 using System.Numerics;
 using ImGuiNET;
 
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Processing;
+
 namespace XIVLauncher.Core.Components;
 
 public class QrEntryPage : Page
@@ -27,7 +31,7 @@ public class QrEntryPage : Page
     {
         ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 7f);
 
-        var childSize = new Vector2(300, 200);
+        var childSize = new Vector2(300, 250);
         var vpSize = ImGuiHelpers.ViewportSize;
 
         ImGui.SetNextWindowPos(new Vector2(vpSize.X / 2 - childSize.X / 2, vpSize.Y / 2 - childSize.Y / 2), ImGuiCond.Always);
@@ -41,15 +45,24 @@ public class QrEntryPage : Page
             if (this.App.qrBytes != null)
             {
                 ImGui.Dummy(new Vector2(10, 10));
-                var data = this.App.qrBytes;
+                using var inputStream = new MemoryStream(this.App.qrBytes);
+                using var image = Image.Load(inputStream);
 
-                qrImage = TextureWrap.Load(data);
+                int newWidth = (int)(image.Width * 1.5);
+                int newHeight = (int)(image.Height * 1.5);
+
+                image.Mutate(x => x.Resize(newWidth, newHeight));
+                
+                using var outputStream = new MemoryStream();
+                image.Save(outputStream, new PngEncoder());
+
+                qrImage = TextureWrap.Load(outputStream.ToArray());
                 var bPos = ImGui.GetWindowPos();
                 var posX = (ImGui.GetWindowSize().X - qrImage.Size.X) * 0.5f;
                 var posY = ImGui.GetCursorPosY();
                 var drawList = ImGui.GetWindowDrawList();
-                drawList.AddRectFilled(new Vector2(bPos.X + posX - 15, bPos.Y + posY - 15),
-                    new Vector2(bPos.X + posX + qrImage.Size.X + 15, bPos.Y + posY + qrImage.Size.Y + 15), 0xffffffff);
+                drawList.AddRectFilled(new Vector2(bPos.X + posX, bPos.Y + posY ),
+                    new Vector2(bPos.X + posX + qrImage.Size.X , bPos.Y + posY + qrImage.Size.Y ), 0xffffffff);
                 ImGui.SetCursorPosX(posX);
                 ImGui.Image(qrImage.ImGuiHandle, qrImage.Size);
                 ImGui.Dummy(new Vector2(10, 10));

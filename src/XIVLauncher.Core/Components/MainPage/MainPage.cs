@@ -421,6 +421,10 @@ public class MainPage : Page
                     {
                         this.App.qrBytes = qrBytes;
                         this.App.AskForQr();
+                        new Task(() =>
+                        {
+                            App.WaitForQr(() => CancelLogin());
+                        }).Start();
                     }).ConfigureAwait(false);
 
                 case LoginType.WeGameToken:

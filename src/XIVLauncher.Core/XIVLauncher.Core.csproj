@@ -133,6 +133,7 @@
     <Content Include="Resources/cimgui.dylib">
       <Link>cimgui.dylib</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
 
@@ -141,6 +142,7 @@
     <Content Include="Resources/libsdl2.dylib">
       <Link>libsdl2.dylib</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
 
