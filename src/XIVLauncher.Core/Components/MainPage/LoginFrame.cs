@@ -101,7 +101,11 @@ public class LoginFrame : Component
             "WeGameToken" => "Wegame Token 登录",
             "WeGameSid" => "Wegame SID 登录",
             // "AutoLoginSession" => "自动登录"
-        }).ToArray(), defaultItem: 2);
+        }).ToArray(), defaultItem: Program.Config.SelectedLoginType ?? 2, onSelectChange: 
+                                        (selectedLoginType) =>
+                                        {
+                                            Program.Config.SelectedLoginType = selectedLoginType;
+                                        });
 
         this.fastLoginCheckbox = new Checkbox("快速登陆");
 

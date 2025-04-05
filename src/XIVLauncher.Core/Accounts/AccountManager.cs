@@ -89,7 +89,8 @@ public class AccountManager
         var isSupported = await newCred.IsSupported();
         if (!isSupported)
         {
-            throw new Exception($"Cred type: {type} not supported");
+            Log.Error($"Cred type: {type} not supported, falling back to NoCred");
+            newCred = new NoCred(this.CredData);
         }
         
         if (oldCred == null)
