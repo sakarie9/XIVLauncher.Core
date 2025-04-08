@@ -83,34 +83,24 @@ public class CredentialManager : ICredProvider
         {
             credentialsPassword = Keyring.GetPassword(Cred.PackageName, SERVICE, Cred.Account);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             Log.Error($"Could not retrieve password for {Cred.Account}");
+            Log.Debug("Generating new password");
+            var password = EncryptionHelper.GetRandomHexString(128);
+            try
+            {
+                Log.Debug("Setting new password");
+                Keyring.SetPassword(Cred.PackageName, SERVICE, Cred.Account, password);
+            }
+            catch (Exception)
+            {
+                Log.Error($"Could not set new password for {Cred.Account}");
+            }
+            return password;
         }
-        if (credentialsPassword != null)
-        {
-            return credentialsPassword;
-        }
-        
-        // If credential is null, create a new one and save
-        try
-        {
-            Keyring.DeletePassword(Cred.PackageName, SERVICE, Cred.Account);
-        }
-        catch (Exception)
-        {
-            Log.Error($"Could not delete password for {Cred.Account}");
-        }
-        var password = EncryptionHelper.GetRandomHexString(128);
-        try
-        {
-            Keyring.SetPassword(Cred.PackageName, SERVICE, Cred.Account, password);
-        }
-        catch (Exception)
-        {
-            Log.Error($"Could not set new password for {Cred.Account}");
-        }
-        return password;
+
+        return credentialsPassword;
     }
 
     public async Task<bool> IsSupported()
