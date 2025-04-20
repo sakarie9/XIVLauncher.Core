@@ -10,9 +10,9 @@ namespace XIVLauncher.Common.Unix.Compatibility;
 public static class Dxvk
 {
 #if WINE_XIV_MACOS
-    // private const string DXVK_DOWNLOAD = "https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507-repack/dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz";
-    private const string DXVK_DOWNLOAD = ServerAddress.S3Address + "/xlcore/deps/dxvk/osx/dxvk-macOS-async-v1.10.3-20230507-repack.tar.gz";
-    private const string DXVK_NAME = "dxvk-macOS-async-v1.10.3-20230507-repack";
+    // Dxvk from https://softwareupdate.xivmac.com/sites/default/files/update_data/XIV%20on%20Mac5.1.tar.xz;
+    private const string DXVK_DOWNLOAD = ServerAddress.S3Address + "/xlcore/deps/dxvk/osx/xom-5.1/dxvk.tar.gz";
+    private const string DXVK_NAME = "dxvk";
 #else
     // private const string DXVK_DOWNLOAD = "https://github.com/Sporif/dxvk-async/releases/download/1.10.1/dxvk-async-1.10.1.tar.gz";
     private const string DXVK_DOWNLOAD = ServerAddress.S3Address + "/xlcore/deps/dxvk/linux/dxvk-async-1.10.1.tar.gz";
