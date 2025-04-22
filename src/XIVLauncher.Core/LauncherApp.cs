@@ -143,7 +143,7 @@ public class LauncherApp : Component
         this.LoadingPage = new LoadingPage(this);
         this.ftsPage = new FtsPage(this);
         this.steamDeckPromptPage = new SteamDeckPromptPage(this);
-
+        /*
         if (!EnvironmentSettings.IsNoKillswitch && !string.IsNullOrEmpty(cutOffBootver))
         {
             var bootver = SeVersion.Parse(Repository.Boot.GetVer(Program.Config.GamePath));
@@ -158,6 +158,7 @@ public class LauncherApp : Component
                 return;
             }
         }
+        */
 
         this.RunStartupTasks();
 
