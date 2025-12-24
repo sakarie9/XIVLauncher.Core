@@ -9,7 +9,7 @@ namespace XIVLauncher.Common.Unix.Compatibility;
 
 public static class Dxmt
 {
-    private const string DXMT_DOWNLOAD = ServerAddress.S3Address + "/xlcore/deps/dxmt/xom-5.1/dxmt.tar.gz";
+    private const string DXMT_DOWNLOAD = ServerAddress.S3Address + "/xlcore/deps/dxmt/xom-5.3.1/dxmt.tar.gz";
     private const string DXMT_NAME = "dxmt";
 
     public static async Task InstallDxmt(DirectoryInfo prefix, DirectoryInfo installDirectory)

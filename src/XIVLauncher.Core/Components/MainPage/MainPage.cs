@@ -207,8 +207,10 @@ public class MainPage : Page
                 gameRunner,
                 "0",
                 "0",
+                0,
                 "1",
                 "2",
+                "",
                 "",
                 "",
                 "",
@@ -393,7 +395,7 @@ public class MainPage : Page
             {
                 try
                 {
-                    return await this.App.Launcher.LoginBySessionKey(username, autoLoginSessionKey: secret).ConfigureAwait(false);
+                    return await this.App.Launcher.LoginBySessionKey(username, autoLoginSessionKey: secret, null).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
@@ -406,7 +408,7 @@ public class MainPage : Page
             switch (type)
             {
                 case LoginType.SdoStatic:
-                    return await this.App.Launcher.LoginBySdoStatic(username, password: secret).ConfigureAwait(false);
+                    return await this.App.Launcher.LoginBySdoStatic(username, password: secret, null).ConfigureAwait(false);
 
                 case LoginType.SdoSlide:
                     return await this.App.Launcher.LoginBySlide(username, autoLogin, this.loginCts, (code) =>
@@ -414,7 +416,7 @@ public class MainPage : Page
                         Log.Information($"叨鱼确认码:{code}");
                         this.LoginMessage = $"确认码: {code}";
                         this.App.StartLoading("正在登录...",this.LoginMessage);
-                    }).ConfigureAwait(false);
+                    }, null).ConfigureAwait(false);
 
                 case LoginType.SdoQrCode:
                     return await this.App.Launcher.LoginByScanQrCode(autoLogin, this.loginCts, (qrBytes) =>
@@ -425,10 +427,10 @@ public class MainPage : Page
                         {
                             App.WaitForQr(() => CancelLogin());
                         }).Start();
-                    }).ConfigureAwait(false);
+                    }, null).ConfigureAwait(false);
 
                 case LoginType.WeGameToken:
-                    return await this.App.Launcher.LoginByWeGameToken(username, token: secret, autoLogin).ConfigureAwait(false);
+                    return await this.App.Launcher.LoginByWeGameToken(username, token: secret, autoLogin, null).ConfigureAwait(false);
 
                 case LoginType.WeGameSid:
                     return await this.App.Launcher.LoginBySid(username, sid: secret).ConfigureAwait(false);
@@ -902,10 +904,12 @@ public class MainPage : Page
         var launchedProcess = App.Launcher.LaunchGameSdo(runner,
             loginResult.OauthLogin.SessionId,
             loginResult.OauthLogin.SndaId,
+            0,
             Area.Areaid,
             Area.AreaLobby,
             Area.AreaGm,
             Area.AreaConfigUpload,
+            "",
             App.Settings.AdditionalArgs,
             App.Settings.GamePath,
             false,

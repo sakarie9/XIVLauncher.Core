@@ -1,3 +1,4 @@
+using FfxivArgLauncher;
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
@@ -26,25 +27,25 @@ public class CompatibilityTools
     private StreamWriter logWriter;
 
 #if WINE_XIV_ARCH_LINUX
-    // private const string WINE_XIV_RELEASE_URL = "https://github.com/goatcorp/wine-xiv-git/releases/download/8.5.r4.g4211bac7/wine-xiv-staging-fsync-git-arch-8.5.r4.g4211bac7.tar.xz";
-    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/arch/wine-xiv-staging-fsync-git-arch-8.5.r4.g4211bac7.tar.xz";
-    private const string WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-8.5.r4.g4211bac7";
+    // private const string WINE_XIV_RELEASE_URL = "https://github.com/goatcorp/wine-xiv-git/releases/download/10.8.r0.g47f77594/wine-xiv-staging-fsync-git-arch-10.8.r0.g47f77594.tar.xz";
+    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/arch/wine-xiv-staging-fsync-git-arch-10.8.r0.g47f77594.tar.xz";
+    private const string WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-10.8.r0.g47f77594";
 #elif WINE_XIV_FEDORA_LINUX
-    // private const string WINE_XIV_RELEASE_URL = "https://github.com/goatcorp/wine-xiv-git/releases/download/8.5.r4.g4211bac7/wine-xiv-staging-fsync-git-fedora-8.5.r4.g4211bac7.tar.xz";
-    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/fedora/wine-xiv-staging-fsync-git-fedora-8.5.r4.g4211bac7.tar.xz";
-    private const string WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-8.5.r4.g4211bac7";
+    // private const string WINE_XIV_RELEASE_URL = "https://github.com/goatcorp/wine-xiv-git/releases/download/10.8.r0.g47f77594/wine-xiv-staging-fsync-git-fedora-10.8.r0.g47f77594.tar.xz";
+    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/fedora/wine-xiv-staging-fsync-git-fedora-10.8.r0.g47f77594.tar.xz";
+    private const string WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-10.8.r0.g47f77594";
 #elif WINE_XIV_MACOS
-    // Wine from https://softwareupdate.xivmac.com/sites/default/files/update_data/XIV%20on%20Mac5.1.tar.xz;
-    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/osx/xom-5.1/wine.tar.gz";
+    // Wine from https://softwareupdate.xivmac.com/sites/default/files/update_data/XIV%20on%20Mac5.3.1.tar.xz;
+    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/osx/xom-5.3.1/wine.tar.gz";
     private const string WINE_XIV_RELEASE_NAME = "wine";
 #else
-    // private const string WINE_XIV_RELEASE_URL = "https://github.com/goatcorp/wine-xiv-git/releases/download/8.5.r4.g4211bac7/wine-xiv-staging-fsync-git-ubuntu-8.5.r4.g4211bac7.tar.xz";
-    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/ubuntu/wine-xiv-staging-fsync-git-ubuntu-8.5.r4.g4211bac7.tar.xz";
-    private const string WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-8.5.r4.g4211bac7";
+    // private const string WINE_XIV_RELEASE_URL = "https://github.com/goatcorp/wine-xiv-git/releases/download/10.8.r0.g47f77594/wine-xiv-staging-fsync-git-ubuntu-10.8.r0.g47f77594.tar.xz";
+    private const string WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/ubuntu/wine-xiv-staging-fsync-git-ubuntu-10.8.r0.g47f77594.tar.xz";
+    private const string WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-10.8.r0.g47f77594";
 #endif
 
-    private const string SD_WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/ubuntu/wine-xiv-staging-fsync-git-ubuntu-8.5.r4.g4211bac7.tar.xz";
-    private const string SD_WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-8.5.r4.g4211bac7";
+    private const string SD_WINE_XIV_RELEASE_URL = ServerAddress.S3Address + "/xlcore/deps/wine/ubuntu/wine-xiv-staging-fsync-git-ubuntu-10.8.r0.g47f77594.tar.xz";
+    private const string SD_WINE_XIV_RELEASE_NAME = "wine-xiv-staging-fsync-git-10.8.r0.g47f77594";
 
     public bool IsToolReady { get; private set; }
 
