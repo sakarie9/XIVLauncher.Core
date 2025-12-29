@@ -39,13 +39,13 @@ jobs:
           sudo apt update -y
           sudo apt install flatpak -y
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo 
-          flatpak install --user org.freedesktop.Sdk.Extension.dotnet8/x86_64/24.08 -y
+          flatpak install --user org.freedesktop.Sdk.Extension.dotnet10/x86_64/24.08 -y
           flatpak install --user org.freedesktop.Sdk/x86_64/24.08 -y
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x # Set this to be the same as the projects required dotnet version.
+          dotnet-version: 10.0.x # Set this to be the same as the projects required dotnet version.
 
       - name: Dotnet Restore
         working-directory: ./src/XIVLauncher.Core/
