@@ -16,7 +16,7 @@ public static class Dxvk
 #else
     // private const string DXVK_DOWNLOAD = "https://raw.githubusercontent.com/goatcorp/xlcore-distrib/refs/heads/main/dxvk-gplasync-v2.6.1-1.tar.gz";
     private const string DXVK_DOWNLOAD = ServerAddress.S3Address + "/xlcore/deps/dxvk/linux/dxvk-gplasync-v2.6.1-1.tar.gz";
-    private const string DXVK_NAME = "dxvk-gplasync-v2.6.1-1.tar.gz";
+    private const string DXVK_NAME = "dxvk-gplasync-v2.6.1-1";
 #endif
 
     public static async Task InstallDxvk(DirectoryInfo prefix, DirectoryInfo installDirectory)
