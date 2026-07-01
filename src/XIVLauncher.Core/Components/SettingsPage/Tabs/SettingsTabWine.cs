@@ -1,104 +1,120 @@
+using System;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 
 using ImGuiNET;
 
 using XIVLauncher.Common.Unix.Compatibility;
+using XIVLauncher.Common.Unix.Compatibility.Dxvk;
+using XIVLauncher.Common.Unix.Compatibility.Wine;
 using XIVLauncher.Common.Util;
 
 namespace XIVLauncher.Core.Components.SettingsPage.Tabs;
 
 public class SettingsTabWine : SettingsTab
 {
-    private SettingsEntry<WineStartupType> startupTypeSetting;
+    private readonly RunningModeEntry rbStartupTypeSetting;
 
     public SettingsTabWine()
     {
+        rbStartupTypeSetting = new RunningModeEntry("运行模式",
+            "选择 Proton 管理模式。Proton = 自动管理的 Proton 版本；Custom = 手动指定 Wine 或 Proton 路径",
+            () => Program.Config.RB_WineStartupType ?? RBWineStartupType.Proton,
+            x => Program.Config.RB_WineStartupType = x);
+
         Entries = new SettingsEntry[]
         {
-            startupTypeSetting = new SettingsEntry<WineStartupType>("Wine Version", "Choose how XIVLauncher will start and manage your wine installation.",
-                () => Program.Config.WineStartupType ?? WineStartupType.Managed, x => Program.Config.WineStartupType = x),
+            // ---- Running mode ----
+            rbStartupTypeSetting,
 
-            new SettingsEntry<string>("Wine Binary Path",
-                "Set the path XIVLauncher will use to run applications via wine.\nIt should be an absolute path to a folder containing wine64 and wineserver binaries.",
-                () => Program.Config.WineBinaryPath, s => Program.Config.WineBinaryPath = s)
+            // Proton version selector
+            new SettingsEntry<string>("Proton 版本",
+                "选择要使用的 Proton 版本。默认使用 RB 的 proton-xiv（对 FF14 有优化）。\n你也可以选择已安装的 Steam Proton 或自定义 Proton。",
+                () => Program.Config.RB_ProtonVersion ?? Program.WineManager.DEFAULTPROTON,
+                s => Program.Config.RB_ProtonVersion = s)
             {
-                CheckVisibility = () => startupTypeSetting.Value == WineStartupType.Custom
+                CheckVisibility = () => Program.Config.RB_WineStartupType == RBWineStartupType.Proton
             },
 
+            // Custom Wine/Proton binary path
+            new SettingsEntry<string>("自定义 Wine/Proton 路径",
+                "设置自定义 Wine 或 Proton 二进制文件的路径。\n对于 Wine：指向包含 wine64 的目录。\n对于 Proton：指向包含 'proton' 可执行文件的目录。",
+                () => Program.Config.RB_WineBinaryPath ?? "/usr/bin",
+                s => Program.Config.RB_WineBinaryPath = s)
+            {
+                CheckVisibility = () => Program.Config.RB_WineStartupType == RBWineStartupType.Custom
+            },
+
+            // UMU Launcher type
+            new SettingsEntry<RBUmuLauncherType>("UMU Launcher",
+                "UMU 是 Proton 的运行环境管理器。\nSystem = 优先使用系统安装的 umu-run；Built-in = 使用内置版本；Disabled = 不使用 UMU。",
+                () => Program.Config.RB_UmuLauncher ?? RBUmuLauncherType.System,
+                x => Program.Config.RB_UmuLauncher = x)
+            {
+                CheckVisibility = () => Program.Config.RB_WineStartupType == RBWineStartupType.Proton
+            },
+
+            // Sync type
+            new SettingsEntry<RBWineSyncType>("同步类型",
+                "选择 Wine/Proton 的同步原语。\nESync = eventfd（兼容性好）；FSync = futex2（推荐，需内核 5.16+）；NTSync = NT 同步（需内核 6.14+ 和 ntsync 模块）。",
+                () => Program.Config.RB_WineSync ?? RBWineSyncType.FSync,
+                x => Program.Config.RB_WineSync = x),
+
+            // Nvapi (DLSS) toggle
+            new SettingsEntry<bool>("Nvapi（DLSS）",
+                "启用 Nvapi 和 DLSS 支持。\n首次启动时会自动查找系统中的 nvngx.dll 并创建符号链接。\n如果使用 AMD 或 Intel 显卡，关闭此选项。",
+                () => Program.Config.RB_NvapiEnabled ?? true,
+                x => Program.Config.RB_NvapiEnabled = x),
+
+            // DXVK version selector
+            new DxvkVersionEntry("DXVK 版本",
+                "选择 DXVK 版本。GPLAsync 2.6.1 是默认（含异步补丁），Stable 2.7 是最新版（无异步补丁）。\n选择「禁用」则使用 Proton 内置的 DXVK。"),
+
+            // Frame rate limit
+            new NumericSettingsEntry("DXVK 帧率限制",
+                "限制渲染帧率。设为 0 表示无限制。",
+                () => Program.Config.RB_DxvkFrameRate ?? 0,
+                fps => Program.Config.RB_DxvkFrameRate = fps,
+                0, int.MaxValue, 1),
+
 #if !FLATPAK
-            new SettingsEntry<bool>("Enable Feral's GameMode", "Enable launching with Feral Interactive's GameMode CPU optimizations.", () => Program.Config.GameModeEnabled ?? true, b => Program.Config.GameModeEnabled = b)
+            new SettingsEntry<bool>("启用 Feral GameMode",
+                "使用 Feral Interactive 的 GameMode CPU 优化来启动游戏。",
+                () => Program.Config.GameModeEnabled ?? true,
+                b => Program.Config.GameModeEnabled = b)
             {
                 CheckVisibility = () => RuntimeInformation.IsOSPlatform(OSPlatform.Linux),
                 CheckValidity = b =>
                 {
                     var handle = IntPtr.Zero;
                     if (b == true && !NativeLibrary.TryLoad("libgamemodeauto.so.0", out handle))
-                        return "GameMode was not detected on your system.";
+                        return "GameMode 未在系统中检测到。";
                     NativeLibrary.Free(handle);
                     return null;
                 }
             },
 #endif
 
-            new SettingsEntry<bool>("Enable DXVK ASYNC", "Enable DXVK ASYNC patch.", () => Program.Config.DxvkAsyncEnabled ?? true, b => Program.Config.DxvkAsyncEnabled = b),
-            new SettingsEntry<bool>("Enable DXMT", "Use direct translation of D3D11 to Metal via DXMT.", () => Program.Config.DxmtEnabled ?? true, b => Program.Config.DxmtEnabled = b)
-            {
-                CheckVisibility = () => RuntimeInformation.IsOSPlatform(OSPlatform.OSX),
-                CheckValidity = b =>
-                {
-                    if (b == true && Environment.OSVersion.Version.Major < 14)
-                        return "MacOS 14.0 or higher is required for DXMT.";
+            new SettingsEntry<bool>("设置 Windows 版本为 7",
+                "Wine 8.1+ 的默认值是 Windows 10，但某些 Dalamud 插件会导致问题。建议使用 Windows 7。",
+                () => Program.Config.SetWin7 ?? true,
+                b => Program.Config.SetWin7 = b),
 
-                    return null;
-                }
-            },
-            new SettingsEntry<bool>("Enable MetalFX", "Enable MetalFX spatial upscaling.", () => Program.Config.MetalFxEnabled ?? true, b => Program.Config.MetalFxEnabled = b)
-            {
-                CheckVisibility = () => RuntimeInformation.IsOSPlatform(OSPlatform.OSX),
-                CheckValidity = b =>
-                {
-                    if (b == true && Environment.OSVersion.Version.Major < 14)
-                        return "MacOS 14.0 or higher is required for DXMT.";
+            new SettingsEntry<DxvkHudType>("DXVK 覆盖层",
+                "配置 DXVK 覆盖层的显示内容。",
+                () => Program.Config.DxvkHudType,
+                type => Program.Config.DxvkHudType = type),
 
-                    return null;
-                }
-            },
-            /*
-            new NumericSettingsEntry("MetalFX Factor", "The upscaling factor for MetalFX", () => Program.Config.MetalFxFactor ?? 2, factor => Program.Config.MetalFxFactor = factor, 0, 10, 1)
-            {
-                CheckVisibility = () => RuntimeInformation.IsOSPlatform(OSPlatform.OSX),
-            },
-            */
+            new SettingsEntry<string>("WINEDEBUG 变量",
+                "配置 Wine 的调试日志记录。有助于故障排除。",
+                () => Program.Config.WineDebugVars ?? string.Empty,
+                s => Program.Config.WineDebugVars = s),
 
-            new SettingsEntry<bool>("Enable ESync", "Enable eventfd-based synchronization.", () => Program.Config.ESyncEnabled ?? true, b => Program.Config.ESyncEnabled = b),
-
-            new SettingsEntry<bool>("Enable Modern MoltenVK", "Enable modern MoltenVK.", () => Program.Config.ModernMvkEnabled ?? true, b => Program.Config.ModernMvkEnabled = b)
-            {
-                CheckVisibility = () => RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-            },
-            new SettingsEntry<bool>("Enable MSync", "Enable MSync.", () => Program.Config.MSyncEnabled ?? true, b => Program.Config.MSyncEnabled = b)
-            {
-                CheckVisibility = () => RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-            },
-            new SettingsEntry<bool>("Enable FSync", "Enable fast user mutex (futex2).", () => Program.Config.FSyncEnabled ?? true, b => Program.Config.FSyncEnabled = b)
-            {
-                CheckVisibility = () => RuntimeInformation.IsOSPlatform(OSPlatform.Linux),
-                CheckValidity = b =>
-                {
-                    if (b == true && (Environment.OSVersion.Version.Major < 5 && (Environment.OSVersion.Version.Minor < 16 || Environment.OSVersion.Version.Major < 6)))
-                        return "Linux kernel 5.16 or higher is required for FSync.";
-
-                    return null;
-                }
-            },
-            new NumericSettingsEntry("DXVK Frame Limit", "Limit rendering to the given number of frames per second. Set to 0 for unlimited", () => Program.Config.DxvkFrameLimit, fps => Program.Config.DxvkFrameLimit = fps, 0, int.MaxValue, 1),
-
-            new SettingsEntry<bool>("Set Windows version to 7", "Default for Wine 8.1+ is Windows 10, but this causes issues with some Dalamud plugins. Windows 7 is recommended for now.", () => Program.Config.SetWin7 ?? true, b => Program.Config.SetWin7 = b),
-
-            new SettingsEntry<Dxvk.DxvkHudType>("DXVK Overlay", "Configure how much of the DXVK overlay is to be shown.", () => Program.Config.DxvkHudType, type => Program.Config.DxvkHudType = type),
-            new SettingsEntry<string>("WINEDEBUG Variables", "Configure debug logging for wine. Useful for troubleshooting.", () => Program.Config.WineDebugVars ?? string.Empty, s => Program.Config.WineDebugVars = s),
-            new SettingsEntry<string>("WINE ENV", "Configure env for wine.", () => Program.Config.WineEnv ?? string.Empty, s => Program.Config.WineEnv = s)
+            new SettingsEntry<string>("WINE ENV",
+                "为 Wine 配置环境变量。",
+                () => Program.Config.WineEnv ?? string.Empty,
+                s => Program.Config.WineEnv = s)
         };
     }
 
@@ -115,31 +131,34 @@ public class SettingsTabWine : SettingsTab
         if (!Program.CompatibilityTools.IsToolDownloaded)
         {
             ImGui.BeginDisabled();
-            ImGui.Text("Compatibility tool isn't set up. Please start the game at least once.");
+            ImGui.Text("兼容性工具尚未设置。请至少启动一次游戏。");
 
             ImGui.Dummy(new Vector2(10));
         }
 
-        if (ImGui.Button("Open prefix"))
+        if (ImGui.Button("打开前缀"))
         {
-            PlatformHelpers.OpenBrowser(Program.CompatibilityTools.Settings.Prefix.FullName);
+            var prefix = Program.CompatibilityTools.IsToolReady
+                ? Program.CompatibilityTools.Prefix.FullName
+                : Program.storage.GetFolder("protonprefix").FullName;
+            PlatformHelpers.OpenBrowser(prefix);
         }
 
         ImGui.SameLine();
 
-        if (ImGui.Button("Open Wine configuration"))
+        if (ImGui.Button("打开 Wine 配置"))
         {
             Program.CompatibilityTools.RunInPrefix("winecfg");
         }
 
         ImGui.SameLine();
 
-        if (ImGui.Button("Open Wine explorer (run apps in prefix)"))
+        if (ImGui.Button("打开 Wine 资源管理器"))
         {
             Program.CompatibilityTools.RunInPrefix("explorer");
         }
 
-        if (ImGui.Button("Kill all wine processes"))
+        if (ImGui.Button("终止所有 Wine 进程"))
         {
             Program.CompatibilityTools.Kill();
         }
@@ -155,5 +174,182 @@ public class SettingsTabWine : SettingsTab
         base.Save();
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             Program.CreateCompatToolsInstance();
+    }
+}
+
+/// <summary>
+/// Settings entry for RBWineStartupType that only shows Proton and Custom options.
+/// "Managed" mode is removed from the UI; any existing Managed config is mapped to Proton.
+/// </summary>
+internal class RunningModeEntry : SettingsEntry<RBWineStartupType>
+{
+    private static readonly RBWineStartupType[] VisibleValues = { RBWineStartupType.Proton, RBWineStartupType.Custom };
+
+    public RunningModeEntry(string name, string description, Func<RBWineStartupType> load, Action<RBWineStartupType> save)
+        : base(name, description, load, save)
+    {
+    }
+
+    public override void Draw()
+    {
+        ImGuiHelpers.TextWrapped(this.Name);
+
+        // Map Managed → Proton for backward compat, then map to visible array index
+        var rawVal = (RBWineStartupType)(this.InternalValue ?? 1);
+        if (rawVal == RBWineStartupType.Managed)
+            rawVal = RBWineStartupType.Proton;
+
+        var currentIdx = Array.IndexOf(VisibleValues, rawVal);
+        if (currentIdx < 0)
+            currentIdx = 0;
+
+        if (ImGui.BeginCombo($"###{Id}", GetDisplayName(rawVal)))
+        {
+            for (var i = 0; i < VisibleValues.Length; i++)
+            {
+                var val = VisibleValues[i];
+                if (ImGui.Selectable(GetDisplayName(val), currentIdx == i))
+                {
+                    this.InternalValue = (int)val;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        // Description
+        ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudGrey);
+        ImGuiHelpers.TextWrapped(this.Description);
+        ImGui.PopStyleColor();
+
+        // Validity check
+        if (this.CheckValidity != null)
+        {
+            var validityMsg = this.CheckValidity.Invoke(this.Value);
+            this.IsValid = string.IsNullOrEmpty(validityMsg);
+
+            if (!this.IsValid)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                ImGui.Text(validityMsg);
+                ImGui.PopStyleColor();
+            }
+        }
+        else
+        {
+            this.IsValid = true;
+        }
+
+        // Warning
+        var warningMessage = this.CheckWarning?.Invoke(this.Value);
+
+        if (warningMessage != null)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+            ImGui.Text(warningMessage);
+            ImGui.PopStyleColor();
+        }
+    }
+
+    private static string GetDisplayName(RBWineStartupType type)
+    {
+        return type switch
+        {
+            RBWineStartupType.Proton => "Proton（推荐）",
+            RBWineStartupType.Custom => "Custom 自定义",
+            _ => type.ToString()
+        };
+    }
+}
+
+/// <summary>
+/// Dropdown entry for DXVK version selection. Shows available DXVK versions
+/// from DxvkManager.Version as a combo box instead of a free-text input.
+/// </summary>
+internal class DxvkVersionEntry : SettingsEntry<string>
+{
+    private string[] _cachedKeys = Array.Empty<string>();
+
+    public DxvkVersionEntry(string name, string description)
+        : base(name, description,
+            () => Program.Config.RB_DxvkVersion ?? Program.DxvkManager.DEFAULT,
+            s => Program.Config.RB_DxvkVersion = s)
+    {
+    }
+
+    public override void Draw()
+    {
+        ImGuiHelpers.TextWrapped(this.Name);
+
+        var versions = Program.DxvkManager.Version;
+        var keys = versions.Keys.ToArray();
+
+        // Rebuild display items when the version list changes
+        _cachedKeys = keys;
+
+        var current = this.Value ?? Program.DxvkManager.DEFAULT;
+
+        // If current value is not in the list, fall back to default
+        if (!versions.ContainsKey(current))
+            current = Program.DxvkManager.DEFAULT;
+
+        if (ImGui.BeginCombo($"###{Id}", GetDisplayName(current, versions)))
+        {
+            foreach (var key in _cachedKeys)
+            {
+                if (ImGui.Selectable(GetDisplayName(key, versions), key == current))
+                {
+                    this.InternalValue = key;
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        // Description
+        ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudGrey);
+        ImGuiHelpers.TextWrapped(this.Description);
+        ImGui.PopStyleColor();
+
+        // Validity
+        if (this.CheckValidity != null)
+        {
+            var validityMsg = this.CheckValidity.Invoke(this.Value);
+            this.IsValid = string.IsNullOrEmpty(validityMsg);
+
+            if (!this.IsValid)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+                ImGui.Text(validityMsg);
+                ImGui.PopStyleColor();
+            }
+        }
+        else
+        {
+            this.IsValid = true;
+        }
+
+        var warningMessage = this.CheckWarning?.Invoke(this.Value);
+
+        if (warningMessage != null)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+            ImGui.Text(warningMessage);
+            ImGui.PopStyleColor();
+        }
+    }
+
+    private static string GetDisplayName(string key, IReadOnlyDictionary<string, IToolRelease> versions)
+    {
+        if (key == "DISABLED")
+            return "禁用（使用 Proton 内置 DXVK）";
+
+        if (versions.TryGetValue(key, out var release))
+        {
+            if (!string.IsNullOrEmpty(release.Label))
+                return release.Label;
+        }
+
+        return key;
     }
 }

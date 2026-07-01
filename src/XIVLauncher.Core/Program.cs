@@ -21,6 +21,10 @@ using XIVLauncher.Common.PlatformAbstractions;
 using XIVLauncher.Common.Support;
 using XIVLauncher.Common.Unix;
 using XIVLauncher.Common.Unix.Compatibility;
+using XIVLauncher.Common.Unix.Compatibility.Wine;
+using XIVLauncher.Common.Unix.Compatibility.Dxvk;
+using XIVLauncher.Common.Unix.Compatibility.Nvapi;
+using XIVLauncher.Common.Unix.Compatibility.Wine.Releases;
 using XIVLauncher.Common.Util;
 using XIVLauncher.Common.Windows;
 using XIVLauncher.Core.Accounts;
@@ -49,6 +53,9 @@ sealed class Program
     public static DalamudUpdater DalamudUpdater { get; private set; } = null!;
     public static DalamudOverlayInfoProxy DalamudLoadInfo { get; private set; } = null!;
     public static CompatibilityTools CompatibilityTools { get; private set; } = null!;
+    public static WineManager WineManager { get; private set; } = null!;
+    public static DxvkManager DxvkManager { get; private set; } = null!;
+    public static NvapiManager NvapiManager { get; private set; } = null!;
 
     public static AccountManager AccountManager => launcherApp.Accounts;
 
@@ -153,6 +160,13 @@ sealed class Program
         Config.WineBinaryPath ??= "/usr/bin";
         Config.WineDebugVars ??= "-all";
 
+        Config.RB_WineStartupType ??= RBWineStartupType.Proton;
+        Config.RB_WineBinaryPath ??= "/usr/bin";
+        Config.RB_WineSync ??= RBWineSyncType.FSync;
+        Config.RB_UmuLauncher ??= RBUmuLauncherType.System;
+        Config.RB_NvapiEnabled ??= true;
+        Config.RB_DxvkFrameRate ??= 0;
+
         Config.FixLDP ??= false;
         Config.FixIM ??= false;
         Config.FixLocale ??= false;
@@ -212,6 +226,18 @@ sealed class Program
         }
 
         SetupLogging(mainArgs);
+
+        // Initialize version managers for Wine/Proton, DXVK, Nvapi
+        if (Environment.OSVersion.Platform == PlatformID.Unix)
+        {
+            WineManager = new WineManager(storage.Root.FullName,
+                CoreEnvironmentSettings.IgnoreLists, CoreEnvironmentSettings.DisableListUpdate);
+            DxvkManager = new DxvkManager(storage.Root.FullName,
+                CoreEnvironmentSettings.IgnoreLists, CoreEnvironmentSettings.DisableListUpdate);
+            NvapiManager = new NvapiManager(storage.Root.FullName,
+                CoreEnvironmentSettings.IgnoreLists, CoreEnvironmentSettings.DisableListUpdate);
+        }
+
         LoadConfig(storage);
 
         Loc.SetupWithFallbacks();
@@ -382,23 +408,95 @@ sealed class Program
 
     public static void CreateCompatToolsInstance()
     {
-        var wineLogFile = new FileInfo(Path.Combine(storage.GetFolder("logs").FullName, "wine.log"));
-        var winePrefix = storage.GetFolder("wineprefix");
-        var wineSettings = new WineSettings(Config.WineStartupType, Config.WineBinaryPath, Config.WineDebugVars, wineLogFile, winePrefix, Config.ESyncEnabled, Config.FSyncEnabled, Config.MSyncEnabled, Config.ModernMvkEnabled, Config.WineEnv);
-        var toolsFolder = storage.GetFolder("compatibilitytool");
-        Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "dxvk"));
-        Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "beta"));
+        var isProton = Config.RB_WineStartupType == RBWineStartupType.Proton ||
+                       (Config.RB_WineStartupType == RBWineStartupType.Custom &&
+                        XIVLauncher.Common.Unix.Compatibility.Wine.WineSettings.IsValidProtonBinaryPath(Config.RB_WineBinaryPath));
+
+        if (isProton && Environment.OSVersion.Platform == PlatformID.Unix)
+        {
+            // Use new Proton/UMU mode
+            var wineLogFile = new FileInfo(Path.Combine(storage.GetFolder("logs").FullName, "wine.log"));
+            var winePrefix = !string.IsNullOrEmpty(CoreEnvironmentSettings.ProtonPrefix)
+                ? new DirectoryInfo(CoreEnvironmentSettings.ProtonPrefix)
+                : storage.GetFolder("protonprefix");
+            var gamePath = Config.GamePath ?? storage.GetFolder("ffxiv");
+            var gameConfigPath = Config.GameConfigPath ?? storage.GetFolder("ffxivConfig");
+
+            // Determine proton version
+            IWineRelease protonRelease;
+            if (Config.RB_WineStartupType == RBWineStartupType.Custom && !string.IsNullOrEmpty(Config.RB_WineBinaryPath))
+            {
+                // Custom Proton path
+                var dir = new DirectoryInfo(Config.RB_WineBinaryPath);
+                var name = dir.Name;
+                protonRelease = new ProtonCustomRelease(name, $"Custom Proton at {Config.RB_WineBinaryPath}", name,
+                    dir.Parent?.FullName ?? "", "");
+            }
+            else
+            {
+                var protonVer = WineManager.GetProtonVersionOrDefault(Config.RB_ProtonVersion);
+                protonRelease = WineManager.GetProton(protonVer);
+            }
+
+            // UMU setup
+            var useBuiltinUmu = CoreEnvironmentSettings.UseBuiltinUmu ||
+                                Config.RB_UmuLauncher == RBUmuLauncherType.Builtin;
+            var umuDisabled = Config.RB_UmuLauncher == RBUmuLauncherType.Disabled;
+            WineManager.SetUmuLauncher(useBuiltinUmu);
+            var umuRelease = umuDisabled ? null : WineManager.Runtime;
+            var wineSync = Config.RB_WineSync ?? RBWineSyncType.FSync;
+
+            var paths = new XLCorePaths(winePrefix, storage.Root, gamePath, gameConfigPath, WineManager.SteamFolder);
+            var winSettings = new XIVLauncher.Common.Unix.Compatibility.Wine.WineSettings(protonRelease, umuRelease, "", paths,
+                Config.WineDebugVars ?? "-all", wineLogFile, wineSync, false);
+
+            // DXVK version
+            var dxvkRel = DxvkManager.GetDxvk(Config.RB_DxvkVersion);
+            var nvapiRel = NvapiManager.GetNvapi(Config.RB_NvapiEnabled == true ? null : "DISABLED");
+
+            var toolsFolder = storage.GetFolder("compatibilitytool");
+            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "dxvk"));
+            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "nvapi"));
+            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "umu"));
+            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "wine"));
+
+            // Map old DxvkHudType to RBHudType (same values)
+            var hudType = Config.DxvkHudType switch
+            {
+                DxvkHudType.Fps => RBHudType.Fps,
+                DxvkHudType.Full => RBHudType.Full,
+                _ => RBHudType.None,
+            };
+
+            CompatibilityTools = new CompatibilityTools(
+                winSettings, dxvkRel,
+                Config.RB_DxvkFrameRate ?? 0,
+                hudType, "",
+                nvapiRel,
+                Config.GameModeEnabled ?? false, Config.DxvkAsyncEnabled ?? true,
+                false, null);
+
+            return;
+        }
+
+        // Legacy Managed Wine / Custom Wine mode (UNCHANGED)
+        var wineLogFile2 = new FileInfo(Path.Combine(storage.GetFolder("logs").FullName, "wine.log"));
+        var winePrefix2 = storage.GetFolder("wineprefix");
+        var wineSettings = new XIVLauncher.Common.Unix.Compatibility.WineSettings(Config.WineStartupType, Config.WineBinaryPath, Config.WineDebugVars, wineLogFile2, winePrefix2, Config.ESyncEnabled, Config.FSyncEnabled, Config.MSyncEnabled, Config.ModernMvkEnabled, Config.WineEnv);
+        var toolsFolder2 = storage.GetFolder("compatibilitytool");
+        Directory.CreateDirectory(Path.Combine(toolsFolder2.FullName, "dxvk"));
+        Directory.CreateDirectory(Path.Combine(toolsFolder2.FullName, "beta"));
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "dxmt"));
+            Directory.CreateDirectory(Path.Combine(toolsFolder2.FullName, "dxmt"));
         }
         CompatibilityTools = new CompatibilityTools(
             wineSettings,
-            Config.DxvkHudType, 
+            Config.DxvkHudType,
             Config.GameModeEnabled,
             Config.DxvkAsyncEnabled,
             Config.DxvkFrameLimit,
-            toolsFolder,
+            toolsFolder2,
             Config.DxmtEnabled,
             Config.MetalFxEnabled,
             Config.MetalFxFactor);
@@ -430,6 +528,12 @@ sealed class Program
     {
         storage.GetFolder("wineprefix").Delete(true);
         storage.GetFolder("wineprefix");
+        // Also clear the proton prefix if it exists
+        if (storage.GetFolder("protonprefix").Exists)
+        {
+            storage.GetFolder("protonprefix").Delete(true);
+            storage.GetFolder("protonprefix");
+        }
     }
 
     public static void ClearPlugins(bool tsbutton = false)
@@ -457,6 +561,9 @@ sealed class Program
         storage.GetFolder("compatibilitytool").Delete(true);
         storage.GetFolder("compatibilitytool/beta");
         storage.GetFolder("compatibilitytool/dxvk");
+        storage.GetFolder("compatibilitytool/wine");
+        storage.GetFolder("compatibilitytool/umu");
+        storage.GetFolder("compatibilitytool/nvapi");
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
             storage.GetFolder("compatibilitytool/dxmt");

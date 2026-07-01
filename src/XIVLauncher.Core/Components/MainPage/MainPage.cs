@@ -18,6 +18,7 @@ using XIVLauncher.Common.Game.Patch;
 using XIVLauncher.Common.Game.Patch.Acquisition;
 using XIVLauncher.Common.Game.Patch.PatchList;
 using XIVLauncher.Common.PlatformAbstractions;
+using XIVLauncher.Common.Unix.Compatibility.Wine;
 using XIVLauncher.Common.Unix;
 using XIVLauncher.Common.Unix.Compatibility;
 using XIVLauncher.Common.Unix.Compatibility.GameFixes;
@@ -836,12 +837,18 @@ public class MainPage : Page
             var _ = Task.Run(async () =>
             {
                 var tempPath = App.Storage.GetFolder("temp");
-                var winver = (App.Settings.SetWin7 ?? true) ? "win7" : "win10";
 
-                await Program.CompatibilityTools.EnsureTool(tempPath).ConfigureAwait(false);
-                Program.CompatibilityTools.RunInPrefix($"winecfg /v {winver}");
+                await Program.CompatibilityTools.EnsureTool(Program.HttpClient, tempPath).ConfigureAwait(false);
 
-                var gameFixApply = new GameFixApply(App.Settings.GamePath, App.Settings.GameConfigPath, Program.CompatibilityTools.Settings.Prefix, tempPath);
+                // Proton-specific setup (matching RB behavior — conditional on settings)
+                if (App.Settings.RB_WineStartupType == RBWineStartupType.Proton ||
+                    App.Settings.RB_WineStartupType == RBWineStartupType.Custom)
+                {
+                    Program.CompatibilityTools.SetWineD3DVulkan(true);
+                    Program.CompatibilityTools.SetHideWineExports(true);
+                }
+
+                var gameFixApply = new GameFixApply(App.Settings.GamePath, App.Settings.GameConfigPath, Program.CompatibilityTools.Prefix, tempPath);
                 gameFixApply.UpdateProgress += (text, hasProgress, progress) =>
                 {
                     App.LoadingPage.Line1 = "正在应用游戏特定的修复...";

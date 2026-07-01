@@ -2,7 +2,26 @@
 
 # XIVLauncher.Core
 
-XIVLauncher 的跨平台版本，针对 Steam Deck 进行了优化。 附带一个 [为最终幻想 14 调整过的 WINE](https://github.com/goatcorp/wine-xiv-git).
+> **基于 [rankynbass/XIVLauncher.Core](https://github.com/rankynbass/XIVLauncher.Core)（RB 分支）移植的 Proton/UMU 支持改进。**
+
+对原版 CN XIVLauncher.Core 的主要更改：
+
+### 🎮 Proton/UMU 游戏运行
+- 用 **Proton + UMU-Launcher** 替换了原有的 managed-Wine 方案
+- 支持 Proton 版本选择（proton-xiv、自定义）
+- 支持 UMU Launcher（System/Builtin/Disabled 三模式）
+- 完整的 ESync/FSync/NTSync 同步原语支持
+
+### ✨ DLSS / Nvapi 支持
+- 自动安装 dxvk-nvapi 到 prefix，启用 DLSS
+
+### 🖼️ DXVK 版本管理
+- 下拉菜单选择 DXVK 版本（Stable、自定义等）
+- Proton 模式下可手动覆盖 Proton 内置的 DXVK 版本
+
+### 🧹 界面简化
+- 移除了旧的 managed-Wine 配置项（WineStartupType、DXVK ASYNC、ESync/MSync/FSync 等）
+- 运行模式只保留 Proton / Custom 两个选项
 
 [反馈频道](https://qun.qq.com/qqweb/qunpro/share?_wv=3&_wwv=128&inviteCode=CZtWN&from=181074&biz=ka&shareSource=5)
 

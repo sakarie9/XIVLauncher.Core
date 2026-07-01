@@ -18,6 +18,12 @@ public static class CoreEnvironmentSettings
     public static uint SteamAppId => GetAppId(Environment.GetEnvironmentVariable("SteamAppId"));
     public static uint AltAppID => GetAppId(Environment.GetEnvironmentVariable("XL_APPID"));
 
+    // Proton/UMU env vars
+    public static bool UseBuiltinUmu => CheckEnvBool("XL_USE_BUILTIN_UMU");
+    public static bool DisableListUpdate => CheckEnvBool("XL_DISABLE_LIST_UPDATE");
+    public static bool IgnoreLists => CheckEnvBool("XL_IGNORE_LISTS");
+    public static string? ProtonPrefix => Environment.GetEnvironmentVariable("PROTONPREFIX");
+
     private static bool CheckEnvBool(string key)
     {
         string val = (Environment.GetEnvironmentVariable(key) ?? string.Empty).ToLower();

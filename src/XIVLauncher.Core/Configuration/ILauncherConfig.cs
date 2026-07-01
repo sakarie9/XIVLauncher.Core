@@ -3,6 +3,7 @@ using XIVLauncher.Common.Addon;
 using XIVLauncher.Common.Dalamud;
 using XIVLauncher.Common.Game.Patch.Acquisition;
 using XIVLauncher.Common.Unix.Compatibility;
+using XIVLauncher.Common.Unix.Compatibility.Wine;
 using XIVLauncher.Core.Accounts.Cred;
 
 namespace XIVLauncher.Core.Configuration;
@@ -83,7 +84,7 @@ public interface ILauncherConfig
     public bool? MetalFxEnabled { get; set; }
     public int? MetalFxFactor { get; set; }
 
-    public Dxvk.DxvkHudType DxvkHudType { get; set; }
+    public DxvkHudType DxvkHudType { get; set; }
 
     public string? WineDebugVars { get; set; }
     public string? WineEnv { get; set; }
@@ -97,6 +98,26 @@ public interface ILauncherConfig
     public bool? FixError127 { get; set; }
 
     public bool? SetWin7 { get; set; }
+
+    #endregion
+
+    #region Proton
+
+    public RBWineStartupType? RB_WineStartupType { get; set; }
+
+    public string? RB_ProtonVersion { get; set; }
+
+    public string? RB_WineBinaryPath { get; set; }
+
+    public RBWineSyncType? RB_WineSync { get; set; }
+
+    public RBUmuLauncherType? RB_UmuLauncher { get; set; }
+
+    public bool? RB_NvapiEnabled { get; set; }
+
+    public string? RB_DxvkVersion { get; set; }
+
+    public int? RB_DxvkFrameRate { get; set; }
 
     #endregion
 
