@@ -387,11 +387,9 @@ sealed class Program
             gd.SwapBuffers(gd.MainSwapchain);
         }
 
-        // Clean up Veldrid resources
-        gd.WaitForIdle();
-        bindings.Dispose();
-        cl.Dispose();
-        gd.Dispose();
+        // Don't dispose Veldrid resources — the SDL2 window surface was already
+        // destroyed by the X button, and disposing the GraphicsDevice would crash.
+        // The OS cleans up all GPU resources on process exit anyway.
 
         HttpClient.Dispose();
 
