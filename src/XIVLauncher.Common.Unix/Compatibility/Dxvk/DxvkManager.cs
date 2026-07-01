@@ -70,7 +70,7 @@ public class DxvkManager
         var dxvkStable = new DxvkStableRelease();
         var dxvkGplAsync = new DxvkStableAsyncRelease();
 
-        this.DEFAULT = dxvkGplAsync.Name; // Default to GPLAsync (current CN default)
+        this.DEFAULT = dxvkStable.Name;
 
         AddVersion(dxvkStable);
         AddVersion(dxvkGplAsync);

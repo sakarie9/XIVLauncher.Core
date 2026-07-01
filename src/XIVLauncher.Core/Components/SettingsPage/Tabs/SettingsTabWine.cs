@@ -69,7 +69,7 @@ public class SettingsTabWine : SettingsTab
 
             // DXVK version selector
             new DxvkVersionEntry("DXVK 版本",
-                "选择 DXVK 版本。GPLAsync 2.6.1 是默认（含异步补丁），Stable 2.7 是最新版（无异步补丁）。\n选择「禁用」则使用 Proton 内置的 DXVK。"),
+                "选择 DXVK 版本。一般选择版本号最大的即可。GPLAsync 为含异步补丁的版本。\n选择「禁用」则使用 Proton 内置的 DXVK。"),
 
             // Frame rate limit
             new NumericSettingsEntry("DXVK 帧率限制",
