@@ -16,6 +16,8 @@ namespace XIVLauncher.Common.Unix.Compatibility.Nvapi;
 
 public class NvapiManager
 {
+    public const string CUSTOM_PATH_NAME = "__CUSTOM_PATH__";
+
     public string DEFAULT { get; private set; }
 
     public Dictionary<string, IToolRelease> Version { get; private set; }
@@ -55,6 +57,7 @@ public class NvapiManager
             InitializeJson();
         else
             InitializeDefault();
+        InitializeLocalNvapi();
     }
 
     public void Reload()
@@ -73,6 +76,7 @@ public class NvapiManager
 
         AddVersion(nvapiStable);
         AddVersion(new NvapiCustomRelease("Disabled", "Do not use Nvapi", "DISABLED", ""));
+        AddVersion(new NvapiCustomRelease("自定义路径", "Use Nvapi from a custom directory", CUSTOM_PATH_NAME, ""));
     }
 
     private NvapiList? ReadJsonFile(FileInfo jsonFile)
@@ -113,8 +117,21 @@ public class NvapiManager
             AddVersion(new NvapiCustomRelease(nvapiRelease.Label, nvapiRelease.Description, nvapiRelease.Name, nvapiRelease.DownloadUrl, nvapiRelease.Checksum));
         }
         AddVersion(new NvapiCustomRelease("Disabled", "Do not use Nvapi", "DISABLED", ""));
+        AddVersion(new NvapiCustomRelease("自定义路径", "Use Nvapi from a custom directory", CUSTOM_PATH_NAME, ""));
 
         this.DEFAULT = nvapiList.Latest;
+    }
+
+    private void InitializeLocalNvapi()
+    {
+        var nvapiToolDir = new DirectoryInfo(nvapiFolder);
+        foreach (var nvapiDir in nvapiToolDir.EnumerateDirectories().OrderBy(x => x.Name))
+        {
+            if (Version.ContainsKey(nvapiDir.Name))
+                continue;
+            if (Directory.Exists(Path.Combine(nvapiDir.FullName, "x64")))
+                AddVersion(new NvapiCustomRelease(nvapiDir.Name, $"Custom nvapi in {nvapiFolder}", nvapiDir.Name, ""));
+        }
     }
 
     private void AddVersion(IToolRelease nvapi)

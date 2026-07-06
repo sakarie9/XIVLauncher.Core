@@ -165,6 +165,9 @@ sealed class Program
         Config.RB_WineSync ??= RBWineSyncType.FSync;
         Config.RB_UmuLauncher ??= RBUmuLauncherType.System;
         Config.RB_NvapiEnabled ??= true;
+        Config.RB_DxvkCustomPath ??= string.Empty;
+        Config.RB_NvapiVersion ??= string.Empty;
+        Config.RB_NvapiCustomPath ??= string.Empty;
         Config.RB_DxvkFrameRate ??= 0;
 
         Config.FixLDP ??= false;
@@ -448,9 +451,36 @@ sealed class Program
             var winSettings = new XIVLauncher.Common.Unix.Compatibility.Wine.WineSettings(protonRelease, umuRelease, "", paths,
                 Config.WineDebugVars ?? "-all", wineLogFile, wineSync, false);
 
-            // DXVK version
-            var dxvkRel = DxvkManager.GetDxvk(Config.RB_DxvkVersion);
-            var nvapiRel = NvapiManager.GetNvapi(Config.RB_NvapiEnabled == true ? null : "DISABLED");
+            // DXVK version - handle custom path
+            IToolRelease dxvkRel;
+            var dxvkVer = DxvkManager.GetVersionOrDefault(Config.RB_DxvkVersion);
+            if (dxvkVer == DxvkManager.CUSTOM_PATH_NAME && !string.IsNullOrEmpty(Config.RB_DxvkCustomPath))
+            {
+                dxvkRel = new XIVLauncher.Common.Unix.Compatibility.Dxvk.Releases.DxvkCustomPathRelease(Config.RB_DxvkCustomPath);
+            }
+            else
+            {
+                dxvkRel = DxvkManager.GetDxvk(dxvkVer);
+            }
+
+            // Nvapi version - handle version selector and custom path
+            IToolRelease nvapiRel;
+            var nvapiVer = !string.IsNullOrEmpty(Config.RB_NvapiVersion)
+                ? NvapiManager.GetVersionOrDefault(Config.RB_NvapiVersion)
+                : (Config.RB_NvapiEnabled == true ? null : "DISABLED");
+
+            if (nvapiVer == NvapiManager.CUSTOM_PATH_NAME && !string.IsNullOrEmpty(Config.RB_NvapiCustomPath))
+            {
+                nvapiRel = new XIVLauncher.Common.Unix.Compatibility.Nvapi.Releases.NvapiCustomPathRelease(Config.RB_NvapiCustomPath);
+            }
+            else if (nvapiVer == "DISABLED" || string.IsNullOrEmpty(nvapiVer))
+            {
+                nvapiRel = NvapiManager.GetNvapi("DISABLED");
+            }
+            else
+            {
+                nvapiRel = NvapiManager.GetNvapi(nvapiVer);
+            }
 
             var toolsFolder = storage.GetFolder("compatibilitytool");
             Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "dxvk"));

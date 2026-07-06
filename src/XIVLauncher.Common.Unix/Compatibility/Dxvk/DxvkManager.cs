@@ -16,6 +16,8 @@ namespace XIVLauncher.Common.Unix.Compatibility.Dxvk;
 
 public class DxvkManager
 {
+    public const string CUSTOM_PATH_NAME = "__CUSTOM_PATH__";
+
     public string DEFAULT { get; private set; }
 
     public Dictionary<string, IToolRelease> Version { get; private set; }
@@ -75,6 +77,7 @@ public class DxvkManager
         AddVersion(dxvkStable);
         AddVersion(dxvkGplAsync);
         AddVersion(new DxvkCustomRelease("Disabled", "Use WineD3D instead", "DISABLED", ""));
+        AddVersion(new DxvkCustomRelease("自定义路径", "Use DXVK from a custom directory", CUSTOM_PATH_NAME, ""));
     }
 
     private DxvkList? ReadJsonFile(FileInfo jsonFile)
@@ -115,6 +118,7 @@ public class DxvkManager
             AddVersion(new DxvkCustomRelease(dxvkRelease.Label, dxvkRelease.Description, dxvkRelease.Name, dxvkRelease.DownloadUrl, dxvkRelease.Checksum));
         }
         AddVersion(new DxvkCustomRelease("Disabled", "Use WineD3D instead", "DISABLED", ""));
+        AddVersion(new DxvkCustomRelease("自定义路径", "Use DXVK from a custom directory", CUSTOM_PATH_NAME, ""));
 
         this.DEFAULT = dxvkList.Latest;
     }

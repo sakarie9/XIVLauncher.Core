@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using Serilog;
 
 using XIVLauncher.Common.Unix.Compatibility.Wine;
+using XIVLauncher.Common.Unix.Compatibility.Nvapi.Releases;
 using XIVLauncher.Common.Util;
 
 namespace XIVLauncher.Common.Unix.Compatibility.Nvapi;
@@ -19,14 +20,29 @@ public static class Nvapi
         if (release.Name == "DISABLED")
             return;
 
-        var nvapiPath = Path.Combine(installDirectory.FullName, release.Name, "x64");
-        if (!Directory.Exists(nvapiPath))
+        string nvapiPath;
+
+        if (release is NvapiCustomPathRelease customRelease)
         {
-            var installPath = new DirectoryInfo(Path.Combine(installDirectory.FullName, release.Name));
-            if (!installPath.Exists)
-                installPath.Create();
-            Log.Information("Dxvk-nvapi does not exist, downloading");
-            await DownloadNvapi(httpClient, installPath, release.DownloadUrl, release.Checksum).ConfigureAwait(false);
+            nvapiPath = Path.Combine(customRelease.CustomDirectory, "x64");
+            if (!Directory.Exists(nvapiPath))
+            {
+                Log.Error("Custom Nvapi path does not contain x64 directory: {Path}", customRelease.CustomDirectory);
+                throw new DirectoryNotFoundException($"x64 directory not found in custom Nvapi path: {customRelease.CustomDirectory}");
+            }
+            Log.Information("Using custom Nvapi from {Path}", nvapiPath);
+        }
+        else
+        {
+            nvapiPath = Path.Combine(installDirectory.FullName, release.Name, "x64");
+            if (!Directory.Exists(nvapiPath))
+            {
+                var installPath = new DirectoryInfo(Path.Combine(installDirectory.FullName, release.Name));
+                if (!installPath.Exists)
+                    installPath.Create();
+                Log.Information("Dxvk-nvapi does not exist, downloading");
+                await DownloadNvapi(httpClient, installPath, release.DownloadUrl, release.Checksum).ConfigureAwait(false);
+            }
         }
 
         var system32 = Path.Combine(prefix.FullName, "drive_c", "windows", "system32");

@@ -117,6 +117,12 @@ public interface ILauncherConfig
 
     public string? RB_DxvkVersion { get; set; }
 
+    public string? RB_DxvkCustomPath { get; set; }
+
+    public string? RB_NvapiVersion { get; set; }
+
+    public string? RB_NvapiCustomPath { get; set; }
+
     public int? RB_DxvkFrameRate { get; set; }
 
     #endregion
