@@ -37,14 +37,14 @@ public class WineSettings
         this.WineRelease = wineRelease;
         if (wineRelease.IsProton)
         {
-            this.parentPath = (wineRelease.Label == "CUSTOM") ? wineRelease.Name : Path.Combine(wineRelease.ParentFolder, wineRelease.Name);
+            this.parentPath = Path.Combine(wineRelease.ParentFolder, wineRelease.Name);
             this.WinePath = Path.Combine(parentPath, "proton");
             this.WineServerPath = Path.Combine(parentPath, "files", "bin", "wineserver");
             this.UmuLauncher = umuLauncher;
         }
         else
         {
-            this.parentPath = (wineRelease.Label == "CUSTOM") ? wineRelease.Name : Path.Combine(wineRelease.ParentFolder, wineRelease.Name, "bin");
+            this.parentPath = Path.Combine(wineRelease.ParentFolder, wineRelease.Name, "bin");
             this.SetWineOrWine64(parentPath);
             this.WineServerPath = Path.Combine(parentPath, "wineserver");
             this.UmuLauncher = null;
@@ -64,6 +64,7 @@ public class WineSettings
             {
                 EnvVars.Add("STEAM_COMPAT_DATA_PATH", Prefix.FullName);
                 EnvVars.Add("STEAM_COMPAT_CLIENT_INSTALL_PATH", Paths.SteamFolder.FullName);
+                EnvVars.Add("STEAM_COMPAT_TOOL_PATHS", parentPath);
             }
             else
             {
