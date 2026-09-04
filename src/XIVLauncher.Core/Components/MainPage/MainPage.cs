@@ -1,5 +1,6 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 using Castle.Core.Internal;
 
@@ -817,18 +818,15 @@ public class MainPage : Page
         {
             runner = new WindowsGameRunner(dalamudLauncher, dalamudOk, Program.DalamudUpdater.Runtime);
         }
-        else if (Environment.OSVersion.Platform == PlatformID.Unix || Environment.OSVersion.Platform == PlatformID.MacOSX)
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            if (App.Settings.WineStartupType == WineStartupType.Custom)
+            // Validate the custom Proton path up front (a custom path must
+            // point at a directory containing the "proton" executable).
+            if (App.Settings.RB_WineStartupType == RBWineStartupType.Custom &&
+                !XIVLauncher.Common.Unix.Compatibility.Wine.WineSettings.IsValidProtonBinaryPath(App.Settings.RB_WineBinaryPath))
             {
-                if (App.Settings.WineBinaryPath == null)
-                    throw new InvalidOperationException("未设置自定义 wine 二进制路径。");
-                else if (!Directory.Exists(App.Settings.WineBinaryPath))
-                    throw new InvalidOperationException("自定义 wine 二进制路径无效：没有这样的目录。\n" +
-                        "仔细检查路径是否有拼写错误： " + App.Settings.WineBinaryPath);
-                else if (!File.Exists(Path.Combine(App.Settings.WineBinaryPath, "wine64")))
-                    throw new InvalidOperationException("自定义 wine 二进制路径无效：在该位置未找到 wine64。\n" +
-                        "仔细检查路径是否有拼写错误：" + App.Settings.WineBinaryPath);
+                throw new InvalidOperationException("自定义 Proton 路径无效：在该位置未找到 'proton' 可执行文件。\n" +
+                    "仔细检查路径是否有拼写错误：" + App.Settings.RB_WineBinaryPath);
             }
 
             var signal = new ManualResetEvent(false);
@@ -840,13 +838,9 @@ public class MainPage : Page
 
                 await Program.CompatibilityTools.EnsureTool(Program.HttpClient, tempPath).ConfigureAwait(false);
 
-                // Proton-specific setup (matching RB behavior — conditional on settings)
-                if (App.Settings.RB_WineStartupType == RBWineStartupType.Proton ||
-                    App.Settings.RB_WineStartupType == RBWineStartupType.Custom)
-                {
-                    Program.CompatibilityTools.SetWineD3DVulkan(true);
-                    Program.CompatibilityTools.SetHideWineExports(true);
-                }
+                // Proton-specific setup (matching RB behavior)
+                Program.CompatibilityTools.SetWineD3DVulkan(true);
+                Program.CompatibilityTools.SetHideWineExports(true);
 
                 var gameFixApply = new GameFixApply(App.Settings.GamePath, App.Settings.GameConfigPath, Program.CompatibilityTools.Prefix, tempPath);
                 gameFixApply.UpdateProgress += (text, hasProgress, progress) =>

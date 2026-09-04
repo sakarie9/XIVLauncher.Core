@@ -66,28 +66,13 @@ public interface ILauncherConfig
 
     #region Linux
 
-    public WineStartupType? WineStartupType { get; set; }
-
-    public string? WineBinaryPath { get; set; }
-
     public bool? GameModeEnabled { get; set; }
 
     public bool? DxvkAsyncEnabled { get; set; }
 
-    public bool? ESyncEnabled { get; set; }
-
-    public bool? FSyncEnabled { get; set; }
-    public bool? MSyncEnabled { get; set; }
-
-    public bool? ModernMvkEnabled { get; set; }
-    public bool? DxmtEnabled { get; set; }
-    public bool? MetalFxEnabled { get; set; }
-    public int? MetalFxFactor { get; set; }
-
     public DxvkHudType DxvkHudType { get; set; }
 
     public string? WineDebugVars { get; set; }
-    public string? WineEnv { get; set; }
 
     public bool? FixLocale { get; set; }
 
@@ -97,31 +82,17 @@ public interface ILauncherConfig
 
     public bool? FixError127 { get; set; }
 
-    public bool? SetWin7 { get; set; }
-
     #endregion
 
     #region Proton
 
     public RBWineStartupType? RB_WineStartupType { get; set; }
 
-    public string? RB_ProtonVersion { get; set; }
-
     public string? RB_WineBinaryPath { get; set; }
 
     public RBWineSyncType? RB_WineSync { get; set; }
 
     public RBUmuLauncherType? RB_UmuLauncher { get; set; }
-
-    public bool? RB_NvapiEnabled { get; set; }
-
-    public string? RB_DxvkVersion { get; set; }
-
-    public string? RB_DxvkCustomPath { get; set; }
-
-    public string? RB_NvapiVersion { get; set; }
-
-    public string? RB_NvapiCustomPath { get; set; }
 
     public int? RB_DxvkFrameRate { get; set; }
 
@@ -136,7 +107,5 @@ public interface ILauncherConfig
     public DirectoryInfo? DalamudManualInjectPath { get; set; }
 
     public int DalamudLoadDelay { get; set; }
-
-    public int DxvkFrameLimit { get; set; }
     #endregion
 }

@@ -25,7 +25,6 @@ public class WineSettings
     public XLCorePaths Paths { get; }
 
     public bool IsProton => WineRelease.IsProton;
-    public bool IsUsingUmu => (UmuLauncher != null) && IsProton;
     private string parentPath { get; }
     public string WinePath { get; private set; }
     public string WineServerPath { get; private set; }
@@ -37,6 +36,11 @@ public class WineSettings
         this.WineRelease = wineRelease;
         if (wineRelease.IsProton)
         {
+            // Proton is always launched through the umu launcher, never by
+            // calling the proton script directly.
+            if (umuLauncher is null)
+                throw new ArgumentNullException(nameof(umuLauncher), "The umu launcher is required for Proton.");
+
             this.parentPath = Path.Combine(wineRelease.ParentFolder, wineRelease.Name);
             this.WinePath = Path.Combine(parentPath, "proton");
             this.WineServerPath = Path.Combine(parentPath, "files", "bin", "wineserver");
@@ -44,10 +48,7 @@ public class WineSettings
         }
         else
         {
-            this.parentPath = Path.Combine(wineRelease.ParentFolder, wineRelease.Name, "bin");
-            this.SetWineOrWine64(parentPath);
-            this.WineServerPath = Path.Combine(parentPath, "wineserver");
-            this.UmuLauncher = null;
+            throw new PlatformNotSupportedException("Only Proton is supported on this platform.");
         }
         this.FsyncOn = wineSync == RBWineSyncType.FSync || wineSync == RBWineSyncType.NTSync;
         this.NTSyncOn = wineSync == RBWineSyncType.NTSync;
@@ -60,19 +61,14 @@ public class WineSettings
         this.EnvVars = new Dictionary<string, string>();
         if (IsProton)
         {
-            if (!IsUsingUmu)
-            {
-                EnvVars.Add("STEAM_COMPAT_DATA_PATH", Prefix.FullName);
-                EnvVars.Add("STEAM_COMPAT_CLIENT_INSTALL_PATH", Paths.SteamFolder.FullName);
-                EnvVars.Add("STEAM_COMPAT_TOOL_PATHS", parentPath);
-            }
-            else
-            {
-                EnvVars.Add("WINEPREFIX", Prefix.FullName);
-                EnvVars.Add("PROTONPATH", parentPath);
-                EnvVars.Add("STORE", "none");
-                EnvVars.Add("PROTON_VERB", "runinprefix");
-            }
+            // Env vars for the umu launcher. umu-run builds a Steam-like
+            // environment from these (STEAM_COMPAT_DATA_PATH etc. are derived
+            // from WINEPREFIX), which is what makes Proton's own DXVK and
+            // NVAPI behave as if the game were launched through Steam.
+            EnvVars.Add("WINEPREFIX", Prefix.FullName);
+            EnvVars.Add("PROTONPATH", parentPath);
+            EnvVars.Add("STORE", "none");
+            EnvVars.Add("PROTON_VERB", "runinprefix");
             EnvVars.Add("PROTON_NO_NTSYNC", NTSyncOn ? "0" : "1");
             EnvVars.Add("PROTON_USE_NTSYNC", NTSyncOn ? "1" : "0");
 
@@ -83,15 +79,6 @@ public class WineSettings
                 EnvVars.Add("PROTON_ENABLE_WAYLAND", "1");
 
             setSteamCompatMounts();
-        }
-        else
-        {
-            EnvVars.Add("WINEESYNC", "1");
-            EnvVars.Add("WINEFSYNC", FsyncOn ? "1" : "0");
-            EnvVars.Add("WINENTSYNC", NTSyncOn ? "1" : "0");
-            EnvVars.Add("WINEPREFIX", Prefix.FullName);
-            if (WaylandOn)
-                EnvVars.Add("DISPLAY", null);
         }
     }
 
@@ -112,18 +99,6 @@ public class WineSettings
         EnvVars.Add("STEAM_COMPAT_MOUNTS", importantPaths.ToString());
     }
 
-    public void SetWineOrWine64(string parentPath)
-    {
-        var wine64 = new FileInfo(Path.Combine(parentPath, "wine64"));
-        var wine = new FileInfo(Path.Combine(parentPath, "wine"));
-        if (wine64.Exists)
-            WinePath = wine64.FullName;
-        else if (wine.Exists)
-            WinePath = wine.FullName;
-        else
-            WinePath = wine64.FullName;
-    }
-
     public static bool WineDLLOverrideIsValid(string dlls)
     {
         string[] invalid = { "msquic", "mscoree", "d3d9", "d3d11", "d3d10core", "dxgi" };
@@ -133,32 +108,6 @@ public class WineSettings
         if (invalid.Any(s => dlls.Contains(s))) return false;
         if (Regex.IsMatch(dlls, format)) return true;
 
-        return false;
-    }
-
-    public static bool HasLsteamclient(string? path)
-    {
-        if (string.IsNullOrEmpty(path))
-            return false;
-        var name = new DirectoryInfo(path).Name;
-        var parent = name == "bin" ? new DirectoryInfo(path).Parent.FullName : path;
-        if (File.Exists(Path.Combine(parent, "lib", "wine", "x86_64-windows", "lsteamclient.dll")))
-            return true;
-        if (File.Exists(Path.Combine(parent, "lib64", "wine", "x86_64-windows", "lsteamclient.dll")))
-            return true;
-        if (File.Exists(Path.Combine(parent, "lib", "x86_64-linux-gnu", "wine", "x86_64-windows", "lsteamclient.dll")))
-            return true;
-        return false;
-    }
-
-    public static bool IsValidWineBinaryPath(string? path)
-    {
-        if (string.IsNullOrEmpty(path))
-            return false;
-        if (File.Exists(Path.Combine(path, "wine64")))
-            return true;
-        if (File.Exists(Path.Combine(path, "wine")))
-            return true;
         return false;
     }
 

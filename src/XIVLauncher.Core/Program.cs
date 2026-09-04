@@ -22,8 +22,6 @@ using XIVLauncher.Common.Support;
 using XIVLauncher.Common.Unix;
 using XIVLauncher.Common.Unix.Compatibility;
 using XIVLauncher.Common.Unix.Compatibility.Wine;
-using XIVLauncher.Common.Unix.Compatibility.Dxvk;
-using XIVLauncher.Common.Unix.Compatibility.Nvapi;
 using XIVLauncher.Common.Unix.Compatibility.Wine.Releases;
 using XIVLauncher.Common.Util;
 using XIVLauncher.Common.Windows;
@@ -54,8 +52,6 @@ sealed class Program
     public static DalamudOverlayInfoProxy DalamudLoadInfo { get; private set; } = null!;
     public static CompatibilityTools CompatibilityTools { get; private set; } = null!;
     public static WineManager WineManager { get; private set; } = null!;
-    public static DxvkManager DxvkManager { get; private set; } = null!;
-    public static NvapiManager NvapiManager { get; private set; } = null!;
 
     public static AccountManager AccountManager => launcherApp.Accounts;
 
@@ -148,27 +144,31 @@ sealed class Program
 
         Config.GameModeEnabled ??= false;
         Config.DxvkAsyncEnabled ??= true;
-        Config.ESyncEnabled ??= true;
-        Config.FSyncEnabled ??= false;
-        Config.MSyncEnabled ??= true;
-        Config.DxmtEnabled ??= false;
-        Config.MetalFxEnabled ??= false;
-        Config.MetalFxFactor ??= 2;
-        Config.SetWin7 ??= true;
 
-        Config.WineStartupType ??= WineStartupType.Managed;
-        Config.WineBinaryPath ??= "/usr/bin";
         Config.WineDebugVars ??= "-all";
 
         Config.RB_WineStartupType ??= RBWineStartupType.Proton;
         Config.RB_WineBinaryPath ??= "/usr/bin";
         Config.RB_WineSync ??= RBWineSyncType.FSync;
         Config.RB_UmuLauncher ??= RBUmuLauncherType.System;
-        Config.RB_NvapiEnabled ??= true;
-        Config.RB_DxvkCustomPath ??= string.Empty;
-        Config.RB_NvapiVersion ??= string.Empty;
-        Config.RB_NvapiCustomPath ??= string.Empty;
         Config.RB_DxvkFrameRate ??= 0;
+
+        // The umu launcher is mandatory for Proton — a legacy "Disabled" value
+        // is treated as System so old configs keep working.
+        if (Config.RB_UmuLauncher == RBUmuLauncherType.Disabled)
+            Config.RB_UmuLauncher = RBUmuLauncherType.System;
+
+        // Only Proton (built-in or custom Proton path) is supported now. Any
+        // "Custom" mode that does not point at a directory containing a
+        // "proton" executable (e.g. old configs pointing at wine binaries) is
+        // migrated back to the managed Proton mode.
+        if (Config.RB_WineStartupType == RBWineStartupType.Custom &&
+            (string.IsNullOrEmpty(Config.RB_WineBinaryPath) ||
+             !WineSettings.IsValidProtonBinaryPath(Config.RB_WineBinaryPath)))
+        {
+            Log.Warning($"[PROTON] Custom path \"{Config.RB_WineBinaryPath}\" is not a valid Proton directory. Falling back to managed Proton.");
+            Config.RB_WineStartupType = RBWineStartupType.Proton;
+        }
 
         Config.FixLDP ??= false;
         Config.FixIM ??= false;
@@ -230,15 +230,10 @@ sealed class Program
 
         SetupLogging(mainArgs);
 
-        // Initialize version managers for Wine/Proton, DXVK, Nvapi
-        if (Environment.OSVersion.Platform == PlatformID.Unix)
+        // Initialize the Proton/Wine and umu-launcher manager
+        if (Environment.OSVersion.Platform == PlatformID.Unix && RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            WineManager = new WineManager(storage.Root.FullName,
-                CoreEnvironmentSettings.IgnoreLists, CoreEnvironmentSettings.DisableListUpdate);
-            DxvkManager = new DxvkManager(storage.Root.FullName,
-                CoreEnvironmentSettings.IgnoreLists, CoreEnvironmentSettings.DisableListUpdate);
-            NvapiManager = new NvapiManager(storage.Root.FullName,
-                CoreEnvironmentSettings.IgnoreLists, CoreEnvironmentSettings.DisableListUpdate);
+            WineManager = new WineManager(storage.Root.FullName);
         }
 
         LoadConfig(storage);
@@ -409,125 +404,70 @@ sealed class Program
 
     public static void CreateCompatToolsInstance()
     {
-        var isProton = Config.RB_WineStartupType == RBWineStartupType.Proton ||
-                       (Config.RB_WineStartupType == RBWineStartupType.Custom &&
-                        XIVLauncher.Common.Unix.Compatibility.Wine.WineSettings.IsValidProtonBinaryPath(Config.RB_WineBinaryPath));
-
-        if (isProton && Environment.OSVersion.Platform == PlatformID.Unix)
-        {
-            // Use new Proton/UMU mode
-            var wineLogFile = new FileInfo(Path.Combine(storage.GetFolder("logs").FullName, "wine.log"));
-            var winePrefix = !string.IsNullOrEmpty(CoreEnvironmentSettings.ProtonPrefix)
-                ? new DirectoryInfo(CoreEnvironmentSettings.ProtonPrefix)
-                : storage.GetFolder("protonprefix");
-            var gamePath = Config.GamePath ?? storage.GetFolder("ffxiv");
-            var gameConfigPath = Config.GameConfigPath ?? storage.GetFolder("ffxivConfig");
-
-            // Determine proton version
-            IWineRelease protonRelease;
-            if (Config.RB_WineStartupType == RBWineStartupType.Custom && !string.IsNullOrEmpty(Config.RB_WineBinaryPath))
-            {
-                // Custom Proton path
-                var dir = new DirectoryInfo(Config.RB_WineBinaryPath);
-                var name = dir.Name;
-                protonRelease = new ProtonCustomRelease(name, $"Custom Proton at {Config.RB_WineBinaryPath}", name,
-                    dir.Parent?.FullName ?? "", "");
-            }
-            else
-            {
-                var protonVer = WineManager.GetProtonVersionOrDefault(Config.RB_ProtonVersion);
-                protonRelease = WineManager.GetProton(protonVer);
-            }
-
-            // UMU setup
-            var useBuiltinUmu = CoreEnvironmentSettings.UseBuiltinUmu ||
-                                Config.RB_UmuLauncher == RBUmuLauncherType.Builtin;
-            var umuDisabled = Config.RB_UmuLauncher == RBUmuLauncherType.Disabled;
-            WineManager.SetUmuLauncher(useBuiltinUmu);
-            var umuRelease = umuDisabled ? null : WineManager.Runtime;
-            var wineSync = Config.RB_WineSync ?? RBWineSyncType.FSync;
-
-            var paths = new XLCorePaths(winePrefix, storage.Root, gamePath, gameConfigPath, WineManager.SteamFolder);
-            var winSettings = new XIVLauncher.Common.Unix.Compatibility.Wine.WineSettings(protonRelease, umuRelease, "", paths,
-                Config.WineDebugVars ?? "-all", wineLogFile, wineSync, false);
-
-            // DXVK version - handle custom path
-            IToolRelease dxvkRel;
-            var dxvkVer = DxvkManager.GetVersionOrDefault(Config.RB_DxvkVersion);
-            if (dxvkVer == DxvkManager.CUSTOM_PATH_NAME && !string.IsNullOrEmpty(Config.RB_DxvkCustomPath))
-            {
-                dxvkRel = new XIVLauncher.Common.Unix.Compatibility.Dxvk.Releases.DxvkCustomPathRelease(Config.RB_DxvkCustomPath);
-            }
-            else
-            {
-                dxvkRel = DxvkManager.GetDxvk(dxvkVer);
-            }
-
-            // Nvapi version - handle version selector and custom path
-            IToolRelease nvapiRel;
-            var nvapiVer = !string.IsNullOrEmpty(Config.RB_NvapiVersion)
-                ? NvapiManager.GetVersionOrDefault(Config.RB_NvapiVersion)
-                : (Config.RB_NvapiEnabled == true ? null : "DISABLED");
-
-            if (nvapiVer == NvapiManager.CUSTOM_PATH_NAME && !string.IsNullOrEmpty(Config.RB_NvapiCustomPath))
-            {
-                nvapiRel = new XIVLauncher.Common.Unix.Compatibility.Nvapi.Releases.NvapiCustomPathRelease(Config.RB_NvapiCustomPath);
-            }
-            else if (nvapiVer == "DISABLED" || string.IsNullOrEmpty(nvapiVer))
-            {
-                nvapiRel = NvapiManager.GetNvapi("DISABLED");
-            }
-            else
-            {
-                nvapiRel = NvapiManager.GetNvapi(nvapiVer);
-            }
-
-            var toolsFolder = storage.GetFolder("compatibilitytool");
-            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "dxvk"));
-            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "nvapi"));
-            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "umu"));
-            Directory.CreateDirectory(Path.Combine(toolsFolder.FullName, "wine"));
-
-            // Map old DxvkHudType to RBHudType (same values)
-            var hudType = Config.DxvkHudType switch
-            {
-                DxvkHudType.Fps => RBHudType.Fps,
-                DxvkHudType.Full => RBHudType.Full,
-                _ => RBHudType.None,
-            };
-
-            CompatibilityTools = new CompatibilityTools(
-                winSettings, dxvkRel,
-                Config.RB_DxvkFrameRate ?? 0,
-                hudType, "",
-                nvapiRel,
-                Config.GameModeEnabled ?? false, Config.DxvkAsyncEnabled ?? true,
-                false, null);
-
+        if (Environment.OSVersion.Platform == PlatformID.Win32NT)
             return;
+
+        // Only Linux is supported: Proton/umu does not run on macOS.
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            throw new PlatformNotSupportedException("XIVLauncherCN 已移除 macOS Wine 支持，请使用 Windows 或 Linux 版本。");
+
+        if (WineManager is null)
+            throw new PlatformNotSupportedException("XIVLauncherCN 仅支持 Windows 与 Linux。");
+
+        // ---- Proton/UMU mode (the only mode on Linux) ----
+        var wineLogFile = new FileInfo(Path.Combine(storage.GetFolder("logs").FullName, "wine.log"));
+        var winePrefix = !string.IsNullOrEmpty(CoreEnvironmentSettings.ProtonPrefix)
+            ? new DirectoryInfo(CoreEnvironmentSettings.ProtonPrefix)
+            : storage.GetFolder("protonprefix");
+        var gamePath = Config.GamePath ?? storage.GetFolder("ffxiv");
+        var gameConfigPath = Config.GameConfigPath ?? storage.GetFolder("ffxivConfig");
+
+        var startupType = Config.RB_WineStartupType == RBWineStartupType.Custom
+            ? RBWineStartupType.Custom
+            : RBWineStartupType.Proton;
+
+        // Determine proton version
+        IWineRelease protonRelease;
+        if (startupType == RBWineStartupType.Custom &&
+            !string.IsNullOrEmpty(Config.RB_WineBinaryPath) &&
+            WineSettings.IsValidProtonBinaryPath(Config.RB_WineBinaryPath))
+        {
+            // Custom Proton path
+            var dir = new DirectoryInfo(Config.RB_WineBinaryPath);
+            var name = dir.Name;
+            protonRelease = new ProtonCustomRelease(name, $"Custom Proton at {Config.RB_WineBinaryPath}", name,
+                dir.Parent?.FullName ?? "", "");
+        }
+        else
+        {
+            if (startupType == RBWineStartupType.Custom)
+                Log.Error($"[PROTON] Custom path \"{Config.RB_WineBinaryPath}\" is not a valid Proton directory. Using the built-in GE-Proton instead.");
+
+            // Only one built-in candidate exists: GE-Proton (downloaded on demand).
+            protonRelease = WineManager.BuiltinProton;
         }
 
-        // Legacy Managed Wine / Custom Wine mode (UNCHANGED)
-        var wineLogFile2 = new FileInfo(Path.Combine(storage.GetFolder("logs").FullName, "wine.log"));
-        var winePrefix2 = storage.GetFolder("wineprefix");
-        var wineSettings = new XIVLauncher.Common.Unix.Compatibility.WineSettings(Config.WineStartupType, Config.WineBinaryPath, Config.WineDebugVars, wineLogFile2, winePrefix2, Config.ESyncEnabled, Config.FSyncEnabled, Config.MSyncEnabled, Config.ModernMvkEnabled, Config.WineEnv);
-        var toolsFolder2 = storage.GetFolder("compatibilitytool");
-        Directory.CreateDirectory(Path.Combine(toolsFolder2.FullName, "dxvk"));
-        Directory.CreateDirectory(Path.Combine(toolsFolder2.FullName, "beta"));
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            Directory.CreateDirectory(Path.Combine(toolsFolder2.FullName, "dxmt"));
-        }
+        // UMU setup - the umu launcher is always used to launch Proton.
+        var useBuiltinUmu = CoreEnvironmentSettings.UseBuiltinUmu ||
+                            Config.RB_UmuLauncher == RBUmuLauncherType.Builtin;
+        WineManager.SetUmuLauncher(useBuiltinUmu);
+        var umuRelease = WineManager.Runtime;
+        var wineSync = Config.RB_WineSync ?? RBWineSyncType.FSync;
+
+        var paths = new XLCorePaths(winePrefix, storage.Root, gamePath, gameConfigPath, WineManager.SteamFolder);
+        var winSettings = new WineSettings(protonRelease, umuRelease, "", paths,
+            Config.WineDebugVars ?? "-all", wineLogFile, wineSync, false);
+
+        // Map old DxvkHudType values to the DXVK_HUD env var (same values)
+        var hudType = Config.DxvkHudType;
+
         CompatibilityTools = new CompatibilityTools(
-            wineSettings,
-            Config.DxvkHudType,
-            Config.GameModeEnabled,
-            Config.DxvkAsyncEnabled,
-            Config.DxvkFrameLimit,
-            toolsFolder2,
-            Config.DxmtEnabled,
-            Config.MetalFxEnabled,
-            Config.MetalFxFactor);
+            winSettings,
+            Config.RB_DxvkFrameRate ?? 0,
+            hudType,
+            Config.GameModeEnabled ?? false,
+            Config.DxvkAsyncEnabled ?? true,
+            false);
     }
 
     public static void ShowWindow()
@@ -556,7 +496,7 @@ sealed class Program
     {
         storage.GetFolder("wineprefix").Delete(true);
         storage.GetFolder("wineprefix");
-        // Also clear the proton prefix if it exists
+        // Clear the proton prefix as well
         if (storage.GetFolder("protonprefix").Exists)
         {
             storage.GetFolder("protonprefix").Delete(true);
@@ -587,15 +527,7 @@ sealed class Program
     public static void ClearTools(bool tsbutton = false)
     {
         storage.GetFolder("compatibilitytool").Delete(true);
-        storage.GetFolder("compatibilitytool/beta");
-        storage.GetFolder("compatibilitytool/dxvk");
-        storage.GetFolder("compatibilitytool/wine");
         storage.GetFolder("compatibilitytool/umu");
-        storage.GetFolder("compatibilitytool/nvapi");
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            storage.GetFolder("compatibilitytool/dxmt");
-        }
         if (tsbutton) CreateCompatToolsInstance();
     }
 

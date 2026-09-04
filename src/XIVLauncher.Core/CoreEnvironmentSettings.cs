@@ -20,8 +20,6 @@ public static class CoreEnvironmentSettings
 
     // Proton/UMU env vars
     public static bool UseBuiltinUmu => CheckEnvBool("XL_USE_BUILTIN_UMU");
-    public static bool DisableListUpdate => CheckEnvBool("XL_DISABLE_LIST_UPDATE");
-    public static bool IgnoreLists => CheckEnvBool("XL_IGNORE_LISTS");
     public static string? ProtonPrefix => Environment.GetEnvironmentVariable("PROTONPREFIX");
 
     private static bool CheckEnvBool(string key)

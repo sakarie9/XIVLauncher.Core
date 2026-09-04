@@ -8,20 +8,19 @@
 
 ### 🎮 Proton/UMU 游戏运行
 - 用 **Proton + UMU-Launcher** 替换了原有的 managed-Wine 方案
-- 支持 Proton 版本选择（proton-xiv、自定义）
-- 支持 UMU Launcher（System/Builtin/Disabled 三模式）
+- Proton 一律通过 **umu-launcher（umu-run）** 启动，不再直接调用 proton 脚本；UMU 提供类似 Steam 的运行环境，使 Proton 内置的 DXVK/NVAPI 正常工作
+- 支持 Proton 版本选择（proton-xiv 等内置版本、自定义 Proton 路径）
+- 支持 UMU Launcher（System / Builtin 两模式）
 - 完整的 ESync/FSync/NTSync 同步原语支持
 
-### ✨ DLSS / Nvapi 支持
-- 自动安装 dxvk-nvapi 到 prefix，启用 DLSS
-
-### 🖼️ DXVK 版本管理
-- 下拉菜单选择 DXVK 版本（Stable、自定义等）
-- Proton 模式下可手动覆盖 Proton 内置的 DXVK 版本
+### 🎨 图形栈直接使用 Proton 内置组件
+- 不再单独下载/安装 DXVK 与 dxvk-nvapi 覆盖到 prefix——DXVK、NVAPI/DLSS 全部由 Proton 内置版本提供
+- DLSS 由 Proton 的 dxvk-nvapi 在 umu 环境下按需启用
 
 ### 🧹 界面简化
-- 移除了旧的 managed-Wine 配置项（WineStartupType、DXVK ASYNC、ESync/MSync/FSync 等）
-- 运行模式只保留 Proton / Custom 两个选项
+- 彻底移除了旧的 managed-Wine / 自定义 Wine 启动模式及其代码路径（WineStartupType、WineEnv、ESync/MSync/FSync、DXMT/MetalFX 等）
+- 移除了 DXVK / Nvapi 版本选择、自定义路径等不再需要的配置项
+- 运行模式只保留 Proton（内置版本）/ Custom（自定义 Proton 路径）两个选项
 
 [反馈频道](https://qun.qq.com/qqweb/qunpro/share?_wv=3&_wwv=128&inviteCode=CZtWN&from=181074&biz=ka&shareSource=5)
 

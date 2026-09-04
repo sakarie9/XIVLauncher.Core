@@ -96,6 +96,15 @@ public class SettingsEntry<T> : SettingsEntry
         ImGuiHelpers.TextWrapped(this.Description);
         ImGui.PopStyleColor();
 
+        DrawDescriptionAndValidity();
+    }
+
+    /// <summary>
+    /// Draws the validity check and warning below the control.
+    /// Used by custom entry draw routines.
+    /// </summary>
+    protected void DrawDescriptionAndValidity()
+    {
         if (this.CheckValidity != null)
         {
             var validityMsg = this.CheckValidity.Invoke(this.Value);

@@ -1,21 +1,14 @@
 using System;
-using System.Net.Http;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Security.Cryptography;
-
-using Newtonsoft.Json;
-using Serilog;
 
 using XIVLauncher.Common.Unix.Compatibility.Wine.Releases;
-using XIVLauncher.Common.Util;
 
 namespace XIVLauncher.Common.Unix.Compatibility.Wine;
 
 public enum RBWineStartupType
 {
+    // Legacy value kept only so old configs keep loading. A saved "Managed"
+    // value is treated as Proton.
     Managed,
     Proton,
     Custom,
@@ -25,6 +18,11 @@ public enum RBUmuLauncherType
 {
     System,
     Builtin,
+
+    /// <summary>
+    /// Legacy value kept only so old configs keep loading. The umu launcher is
+    /// mandatory for Proton and a saved "Disabled" value is treated as System.
+    /// </summary>
     Disabled,
 }
 
@@ -35,89 +33,54 @@ public enum RBWineSyncType
     NTSync,
 }
 
+/// <summary>
+/// Manages the single built-in Proton release (GE-Proton) and the umu launcher.
+/// There is no version list anymore: the launcher offers exactly two choices,
+/// the built-in GE-Proton or a user-supplied custom Proton path (the latter is
+/// handled in Program.CreateCompatToolsInstance).
+/// </summary>
 public class WineManager
 {
-    public string DEFAULTWINE { get; private set; }
-
-    public string DEFAULTPROTON { get; private set; }
-
-    public Dictionary<string, IWineRelease> WineVersion { get; private set; }
-
-    public Dictionary<string, IWineRelease> ProtonVersion { get; private set; }
+    /// <summary>
+    /// The one and only built-in Proton candidate (GE-Proton). It is only
+    /// downloaded on demand, when the launcher starts the game with it.
+    /// </summary>
+    public IWineRelease BuiltinProton { get; }
 
     public IToolRelease Runtime { get; private set; }
 
-    public bool IsListUpdated { get; private set; } = false;
+    public DirectoryInfo SteamFolder { get; }
 
-    private const string WINELIST_URL = "https://raw.githubusercontent.com/rankynbass/XIV-compatibilitytools/refs/heads/main/RB-runnerlist.json";
-
-    private const string JSON_NAME = "RB-runnerlist.json";
-
-    private const string UMULAUNCHER_URL = "https://github.com/Open-Wine-Components/umu-launcher/releases/download/1.2.9/umu-launcher-1.2.9-zipapp.tar";
-
-    private WineReleaseDistro wineDistroId { get; }
-
-    private string wineFolder { get; }
+    private const string UMULAUNCHER_URL = "https://github.com/Open-Wine-Components/umu-launcher/releases/download/1.4.4/umu-launcher-1.4.4-zipapp.tar";
 
     private string umuFolder { get; }
 
     private string umuLauncherUrl { get; set; }
 
-    private string rootFolder { get; }
-
-    private string commonFolder { get; }
-
-    private string compatFolder { get; }
-
-    private string usrCompatFolder { get; }
-
-    private FileInfo wineJson { get; set; }
-
-    public DirectoryInfo SteamFolder { get; }
-
-    private bool ignoreList { get; }
-
-    private bool disableUpdate { get; }
-
-    public WineManager(string root, bool ignoreList, bool disableUpdate)
+    public WineManager(string root)
     {
-        this.rootFolder = root;
-        this.ignoreList = ignoreList;
-        this.disableUpdate = disableUpdate;
-        this.wineJson = new FileInfo(Path.Combine(rootFolder, JSON_NAME));
-
-        // Wine
-        this.wineFolder = Path.Combine(root, "compatibilitytool", "wine");
-        if (!Directory.Exists(wineFolder))
-            Directory.CreateDirectory(wineFolder);
-        this.wineDistroId = CompatUtil.GetWineIdForDistro();
-
-        // Proton - search Steam directories for local Proton installations
+        // Locate the Steam installation. The built-in Proton is installed into
+        // Steam's compatibilitytools.d so it also shows up inside Steam itself.
         var home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);
-        var steamfolder1 = Path.Combine(home, ".steam", "steam", "steamapps", "common");
-        var steamfolder2 = Path.Combine(home, ".local", "share", "Steam", "steamapps", "common");
-        if (Directory.Exists(steamfolder1))
+        var compatFolder = Path.Combine(home, ".steam", "steam", "compatibilitytools.d");
+        if (Directory.Exists(Path.Combine(home, ".steam", "steam", "steamapps", "common")))
         {
             this.SteamFolder = new DirectoryInfo(Path.Combine(home, ".steam", "steam"));
-            this.commonFolder = steamfolder1;
-            this.compatFolder = Path.Combine(home, ".steam", "steam", "compatibilitytools.d");
         }
         else
         {
+            compatFolder = Path.Combine(home, ".local", "share", "Steam", "compatibilitytools.d");
             this.SteamFolder = new DirectoryInfo(Path.Combine(home, ".local", "share", "Steam"));
-            this.commonFolder = steamfolder2;
-            this.compatFolder = Path.Combine(home, ".local", "share", "Steam", "compatibilitytools.d");
         }
-        this.usrCompatFolder = Path.Combine("/", "usr", "share", "steam", "compatibilitytools.d");
-        if (!Directory.Exists(commonFolder))
-            Directory.CreateDirectory(commonFolder);
         if (!Directory.Exists(compatFolder))
             Directory.CreateDirectory(compatFolder);
 
         // Umu Launcher
         this.umuFolder = Path.Combine(root, "compatibilitytool", "umu");
+        this.umuLauncherUrl = UMULAUNCHER_URL;
 
-        Load();
+        // The single built-in candidate: GE-Proton.
+        this.BuiltinProton = new ProtonLatestRelease(compatFolder);
     }
 
     public void SetUmuLauncher(bool useBuiltinUmu)
@@ -126,188 +89,6 @@ public class WineManager
         Runtime = umuPath is null
             ? new UmuLauncherRelease(Path.Combine(umuFolder, "umu-run"), this.umuLauncherUrl)
             : new UmuLauncherRelease(umuPath, "");
-    }
-
-    private void Load()
-    {
-        if (wineJson.Exists && !ignoreList)
-            InitializeJson();
-        else
-            InitializeDefault();
-
-        InitializeLocalWine();
-        InitializeLocalProton();
-    }
-
-    public void Reload()
-    {
-        Log.Verbose("[WINEMANAGER] Previous wine and proton lists cleared.");
-        this.IsListUpdated = true;
-        Load();
-    }
-
-    private void InitializeDefault()
-    {
-        WineVersion = new Dictionary<string, IWineRelease>();
-        ProtonVersion = new Dictionary<string, IWineRelease>();
-
-        // Proton - default to XIV-Proton10-8 (RB's proton-xiv)
-        var protonLatest = new ProtonLatestRelease(compatFolder);
-        var protonStable = new ProtonStableRelease(compatFolder);
-        var protonLegacy = new ProtonLegacyRelease(compatFolder);
-
-        this.DEFAULTPROTON = protonLatest.Name;
-
-        // Add all proton versions (both proton-xiv and variants)
-        AddVersion(protonLatest);
-        AddVersion(new ProtonLatestNtsyncRelease(compatFolder));
-        AddVersion(protonStable);
-        AddVersion(new ProtonStableNtsyncRelease(compatFolder));
-        AddVersion(protonLegacy);
-
-        // Wine
-        var wineStable = new WineStableRelease(wineDistroId, wineFolder);
-        var wineBeta = new WineBetaRelease(wineDistroId, wineFolder);
-        var wineLegacy = new WineLegacyRelease(wineDistroId, wineFolder);
-
-        this.DEFAULTWINE = wineStable.Name;
-
-        AddVersion(wineStable);
-        AddVersion(wineBeta);
-        AddVersion(wineLegacy);
-
-        this.umuLauncherUrl = UMULAUNCHER_URL;
-    }
-
-    private WineList? ReadJsonFile(FileInfo jsonFile)
-    {
-        WineList wineList;
-        using (var file = new StreamReader(jsonFile.OpenRead()))
-        {
-            try
-            {
-                wineList = JsonConvert.DeserializeObject<WineList>(file.ReadToEnd());
-                if (string.IsNullOrEmpty(wineList.UmuLauncherUrl) || string.IsNullOrEmpty(wineList.DefaultWine) || string.IsNullOrEmpty(wineList.DefaultProton))
-                    throw new JsonSerializationException("JSON file is invalid: missing entries");
-                if (wineList.WineVersions.Count == 0)
-                    throw new JsonSerializationException("JSON file is invalid: wine list empty");
-                if (wineList.ProtonVersions.Count == 0)
-                    throw new JsonSerializationException("JSON file is invalid: proton list empty");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, $"{jsonFile.FullName} is invalid.");
-                wineList = null;
-            }
-        }
-        return wineList;
-    }
-
-    private void InitializeJson()
-    {
-        WineVersion = new Dictionary<string, IWineRelease>();
-        ProtonVersion = new Dictionary<string, IWineRelease>();
-        WineList wineList = ReadJsonFile(wineJson);
-        if (wineList is null)
-        {
-            InitializeDefault();
-            IsListUpdated = true;
-            return;
-        }
-
-        foreach (var wineRelease in wineList.WineVersions)
-        {
-            AddVersion(new WineCustomRelease(wineRelease.Label, wineRelease.Description, wineRelease.Name, this.wineFolder, wineRelease.DownloadUrl.Replace("{wineDistroId}", wineDistroId.ToString()), wineRelease.Lsteamclient, wineRelease.Checksums));
-        }
-        foreach (var protonRelease in wineList.ProtonVersions)
-        {
-            AddVersion(new ProtonCustomRelease(protonRelease.Label, protonRelease.Description, protonRelease.Name, this.compatFolder, protonRelease.DownloadUrl, protonRelease.Checksums[0]));
-        }
-
-        this.DEFAULTWINE = wineList.DefaultWine;
-        this.DEFAULTPROTON = wineList.DefaultProton;
-        this.umuLauncherUrl = wineList.UmuLauncherUrl;
-    }
-
-    private void InitializeLocalWine()
-    {
-        var wineToolDir = new DirectoryInfo(wineFolder);
-        if (!wineToolDir.Exists)
-            return;
-        foreach (var wineDir in wineToolDir.EnumerateDirectories().OrderBy(x => x.Name))
-        {
-            if (WineVersion.ContainsKey(wineDir.Name))
-                continue;
-            if (File.Exists(Path.Combine(wineDir.FullName, "bin", "wine64")) ||
-                File.Exists(Path.Combine(wineDir.FullName, "bin", "wine")))
-            {
-                AddVersion(new WineCustomRelease(wineDir.Name, $"Custom wine in {wineFolder}", wineDir.Name, wineFolder, "", WineSettings.HasLsteamclient(Path.Combine(wineFolder, wineDir.Name))));
-            }
-        }
-    }
-
-    private void InitializeLocalProton()
-    {
-        DirectoryInfo[] searchFolders = [ new DirectoryInfo(compatFolder), new DirectoryInfo(commonFolder), new DirectoryInfo(usrCompatFolder) ];
-        foreach (var currentFolder in searchFolders)
-        {
-            if (!currentFolder.Exists)
-                continue;
-            foreach (var protonDir in currentFolder.EnumerateDirectories().OrderBy(x => x.Name))
-            {
-                if (ProtonVersion.ContainsKey(protonDir.Name))
-                    continue;
-                if (File.Exists(Path.Combine(protonDir.FullName, "proton")))
-                {
-                    string name;
-                    if (protonDir.Name.ToLowerInvariant().Contains("ge-proton") || protonDir.Name.ToLowerInvariant().Contains("proton-ge"))
-                        name = "GE-Proton";
-                    else if (protonDir.Name.ToLowerInvariant().Contains("xiv-"))
-                        name = "XIV-Proton";
-                    else if (protonDir.Name.ToLowerInvariant().Contains("cachyos"))
-                        name = "CachyOS Proton";
-                    else
-                        name = "Proton";
-                    AddVersion(new ProtonCustomRelease(protonDir.Name, $"{name} in {currentFolder.FullName}", protonDir.Name, currentFolder.FullName, ""));
-                }
-            }
-        }
-    }
-
-    private void AddVersion(IWineRelease wine)
-    {
-        if (wine.IsProton)
-            ProtonVersion.Add(wine.Name, wine);
-        else
-            WineVersion.Add(wine.Name, wine);
-    }
-
-    public string GetWineVersionOrDefault(string? name)
-    {
-        if (string.IsNullOrEmpty(name))
-            return DEFAULTWINE;
-        if (WineVersion.ContainsKey(name))
-            return name;
-        return DEFAULTWINE;
-    }
-
-    public string GetProtonVersionOrDefault(string? name)
-    {
-        if (string.IsNullOrEmpty(name))
-            return DEFAULTPROTON;
-        if (ProtonVersion.ContainsKey(name))
-            return name;
-        return DEFAULTPROTON;
-    }
-
-    public IWineRelease GetWine(string? name)
-    {
-        return WineVersion[GetWineVersionOrDefault(name)];
-    }
-
-    public IWineRelease GetProton(string? name)
-    {
-        return ProtonVersion[GetProtonVersionOrDefault(name)];
     }
 
     private string? findUmuLauncher(bool useBuiltinUmu)
@@ -324,43 +105,5 @@ public class WineManager
                 return Path.GetFullPath(umu);
         }
         return null;
-    }
-
-    public async Task DownloadWineList(bool keepUpdated, HttpClient client)
-    {
-        if (disableUpdate || !keepUpdated)
-            return;
-
-        var tempPath = PlatformHelpers.GetTempFileName();
-
-        File.WriteAllBytes(tempPath, await client.GetByteArrayAsync(WINELIST_URL).ConfigureAwait(false));
-
-        if (ReadJsonFile(new FileInfo(tempPath)) is null)
-            return;
-
-        if (!wineJson.Exists)
-        {
-            File.Move(tempPath, wineJson.FullName);
-            wineJson = new FileInfo(wineJson.FullName);
-            Reload();
-            return;
-        }
-
-        using var sha512 = SHA512.Create();
-        using var tempPathStream = File.OpenRead(tempPath);
-        using var wineListStream = wineJson.OpenRead();
-        var tempPathHash = Convert.ToHexString(sha512.ComputeHash(tempPathStream)).ToLowerInvariant();
-        var wineListHash = Convert.ToHexString(sha512.ComputeHash(wineListStream)).ToLowerInvariant();
-        if (tempPathHash != wineListHash)
-        {
-            wineJson.Delete();
-            File.Move(tempPath, wineJson.FullName);
-            Reload();
-        }
-    }
-
-    public void DoneUpdatingWineList()
-    {
-        IsListUpdated = false;
     }
 }
