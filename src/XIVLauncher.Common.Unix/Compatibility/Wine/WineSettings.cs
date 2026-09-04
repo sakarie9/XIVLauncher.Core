@@ -10,7 +10,12 @@ namespace XIVLauncher.Common.Unix.Compatibility.Wine;
 
 public class WineSettings
 {
-    private const string WINEDLLOVERRIDES = "msquic=,mscoree=n,b;d3d9,d3d11,d3d10core,dxgi=";
+    // Native-first overrides for the d3d stack. d3d12/d3d12core must be forced
+    // to native as well: vkd3d-proton ships as a small d3d12.dll forwarder plus
+    // the real implementation in d3d12core.dll, and without an override Wine
+    // prefers its own builtin d3d12/d3d12core, which cannot create a D3D12
+    // device on DXVK's DXGI adapter (E_NOINTERFACE).
+    private const string WINEDLLOVERRIDES = "msquic=,mscoree=n,b;d3d9,d3d11,d3d10core,dxgi,d3d12,d3d12core=";
 
     public IWineRelease WineRelease { get; private set; }
     public IToolRelease UmuLauncher { get; private set; }
@@ -101,7 +106,7 @@ public class WineSettings
 
     public static bool WineDLLOverrideIsValid(string dlls)
     {
-        string[] invalid = { "msquic", "mscoree", "d3d9", "d3d11", "d3d10core", "dxgi" };
+        string[] invalid = { "msquic", "mscoree", "d3d9", "d3d11", "d3d10core", "dxgi", "d3d12", "d3d12core" };
         var format = @"^(?:(?:[a-zA-Z0-9_\-\.]+,?)+=(?:n,b|b,n|n|b|d|,|);?)+$";
 
         if (string.IsNullOrEmpty(dlls)) return true;
