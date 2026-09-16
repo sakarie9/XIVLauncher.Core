@@ -608,6 +608,15 @@ public class MainPage : Page
 
         Debug.Assert(loginResult.State == Launcher.LoginState.Ok);
 
+        // The first launch of a launcher session can die before the game even
+        // starts: Proton's "waitforexitandrun" verb runs "wineserver -w" first, so
+        // it races with the wineserver that the helper commands (prefix check,
+        // winepath) started, and it may also refresh the prefix, which restarts
+        // the session it just created. A second attempt always worked, so retry
+        // once instead of reporting a failure the user has to work around.
+        const int MAX_LAUNCH_ATTEMPTS = 1;
+        var launchAttempts = 0;
+
         while (true)
         {
             List<Exception> exceptions = new();
@@ -624,12 +633,28 @@ public class MainPage : Page
                 using var process = await StartGameAndAddon(loginResult, isSteam, action == LoginAction.GameNoDalamud, action == LoginAction.GameNoPlugins, action == LoginAction.GameNoThirdparty).ConfigureAwait(false);
 
                 if (process is null)
-                    throw new InvalidOperationException("Could not obtain Process Handle");
-
-                if (process.ExitCode != 0 && (App.Settings.TreatNonZeroExitCodeAsFailure ?? false))
                 {
-                    throw new InvalidOperationException("Game exited with non-zero exit code");
+                    if (launchAttempts < MAX_LAUNCH_ATTEMPTS && !GameHelpers.CheckIsGameOpen())
+                    {
+                        launchAttempts++;
+                        Log.Warning("The game did not start; retrying the launch ({Attempt}/{Max})", launchAttempts, MAX_LAUNCH_ATTEMPTS);
 
+                        App.StartLoading("正在重试启动游戏...", "第一次启动没有成功，正在再试一次。请稍等！");
+                        await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+                        continue;
+                    }
+
+                    throw new InvalidOperationException("Could not obtain Process Handle");
+                }
+
+                // Only ask for the exit code when the user actually enabled this
+                // check: on Linux a Process obtained via Process.GetProcessById was
+                // not started by us, so reading ExitCode throws instead of
+                // returning the code.
+                if ((App.Settings.TreatNonZeroExitCodeAsFailure ?? false) && TryGetExitCode(process) is int exitCode && exitCode != 0)
+                {
+                    throw new InvalidOperationException($"Game exited with non-zero exit code: {exitCode}");
                 }
 
                 return true;
@@ -642,6 +667,24 @@ public class MainPage : Page
                 throw;
             }
 
+        }
+    }
+
+    /// <summary>
+    /// Returns the exit code of the game process, or null when it cannot be
+    /// determined. On Unix the process was located by PID and not started by
+    /// this process, so the runtime refuses to report its exit code.
+    /// </summary>
+    private static int? TryGetExitCode(Process process)
+    {
+        try
+        {
+            return process.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not read the game process exit code");
+            return null;
         }
     }
 
@@ -916,8 +959,18 @@ public class MainPage : Page
             false,
             App.Settings.DpiAwareness.GetValueOrDefault(DpiAwareness.Unaware));
 
+        if (launchedProcess == null)
+        {
+            Log.Information("GameProcess was null...");
+            IsLoggingIn = false;
+            return null!;
+        }
+
         // Hide the launcher if not Steam Deck or if using as a compatibility tool (XLM)
-        // Show the Steam Deck prompt if on steam deck and not using as a compatibility tool
+        // Show the Steam Deck prompt if on steam deck and not using as a compatibility tool.
+        // This must only happen once the game process was obtained: if the window is
+        // hidden first, the error shown for a failed launch is invisible and the
+        // launcher stays in the background forever waiting for it to be dismissed.
         if (!Program.IsSteamDeckHardware || CoreEnvironmentSettings.IsSteamCompatTool)
         {
             Hide();
@@ -925,13 +978,6 @@ public class MainPage : Page
         else
         {
             App.State = LauncherApp.LauncherState.SteamDeckPrompt;
-        }
-
-        if (launchedProcess == null)
-        {
-            Log.Information("GameProcess was null...");
-            IsLoggingIn = false;
-            return null!;
         }
 
         var addonMgr = new AddonManager();

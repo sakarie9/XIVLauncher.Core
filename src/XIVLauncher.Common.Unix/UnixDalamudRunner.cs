@@ -87,117 +87,290 @@ public class UnixDalamudRunner : IDalamudRunner
         // Use RunTheGame like RB does — critical for Proton/UMU mode
         var dalamudProcess = compatibility.RunTheGame(string.Join(" ", launchArguments), environment: environment, redirectOutput: true, writeLog: true);
 
-        DalamudConsoleOutput dalamudConsoleOutput = null;
-        int invalidJsonCount = 0;
-
-        // Keep checking for valid json output, but only 5 times.
-        // If it's still erroring out at that point, fall back to process name lookup.
-        while (dalamudConsoleOutput == null && invalidJsonCount < 5)
+        // The injector is supposed to print a JSON line with the Wine PID of the
+        // game, which we then translate to a Unix PID. Under the umu-launcher /
+        // pressure-vessel sandbox that pipe is not connected: it stays silent and
+        // only reports EOF once the whole wrapper (and therefore the game) has
+        // exited. Reading it inline meant we only started looking for the game
+        // after it was already gone. Read it on a background thread and look for
+        // the game process in parallel instead.
+        var injectorOutput = new InjectorOutput();
+        new Thread(() => ReadInjectorOutput(dalamudProcess, injectorOutput))
         {
-            var output = dalamudProcess.StandardOutput.ReadLine();
+            IsBackground = true,
+            Name = "Dalamud injector stdout",
+        }.Start();
 
-            if (output == null)
+        Process? gameProcess = null;
+        DalamudConsoleOutput? handledOutput = null;
+        var stdoutFallbackLogged = false;
+        var deadline = DateTime.UtcNow.AddSeconds(PROCESS_LOOKUP_TIMEOUT_SECONDS);
+
+        while (gameProcess is null && DateTime.UtcNow < deadline)
+        {
+            var consoleOutput = injectorOutput.Value;
+
+            if (consoleOutput is not null && !ReferenceEquals(consoleOutput, handledOutput))
             {
-                Log.Warning("Dalamud injector produced no stdout output; trying fallback process lookup");
-                return FindGameProcessByPolling();
+                handledOutput = consoleOutput;
+                gameProcess = this.GetGameProcessFromWinePid(consoleOutput.Pid);
+            }
+            else
+            {
+                if (injectorOutput.Closed && !stdoutFallbackLogged)
+                {
+                    Log.Warning("Dalamud injector produced no stdout output; trying fallback process lookup");
+                    stdoutFallbackLogged = true;
+                }
+
+                gameProcess = FindGameProcessByName();
             }
 
-            Console.WriteLine(output);
-
-            try
-            {
-                dalamudConsoleOutput = JsonConvert.DeserializeObject<DalamudConsoleOutput>(output);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, $"Couldn't parse Dalamud output: {output}");
-            }
-
-            invalidJsonCount++;
+            if (gameProcess is null)
+                Thread.Sleep(1000);
         }
 
-        // Drain remaining output in background thread (same as RB)
-        new Thread(() =>
+        if (gameProcess is null && !HasExited(dalamudProcess))
         {
-            while (!dalamudProcess.StandardOutput.EndOfStream)
-            {
-                var output = dalamudProcess.StandardOutput.ReadLine();
-                if (output != null)
-                    Console.WriteLine(output);
-            }
-        }).Start();
+            // We could not identify the actual game process (which can happen
+            // when the sandbox hides it and its name cannot be resolved), but the
+            // wrapper launched with "waitforexitandrun" tracks the lifetime of
+            // the game. Waiting on it still closes the launcher when the game
+            // ends instead of leaving it behind.
+            Log.Warning("Could not identify the game process; using the launcher wrapper process to track the game");
+            gameProcess = dalamudProcess;
+        }
+        else if (gameProcess is null)
+        {
+            var exited = HasExited(dalamudProcess);
+            var exitCode = exited ? TryGetExitCode(dalamudProcess) : null;
 
+            Log.Error(
+                "Could not find game process within {Timeout} seconds (injector wrapper exited: {Exited}, exit code: {ExitCode})",
+                PROCESS_LOOKUP_TIMEOUT_SECONDS,
+                exited,
+                exitCode?.ToString() ?? "n/a");
+        }
+
+        return gameProcess;
+    }
+
+    private const int PROCESS_LOOKUP_TIMEOUT_SECONDS = 30;
+
+    private static int? TryGetExitCode(Process process)
+    {
         try
         {
-            var unixPid = compatibility.GetUnixProcessId(dalamudConsoleOutput.Pid);
+            return process.ExitCode;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool HasExited(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Translates the Wine PID reported by the injector into a Unix process.
+    /// Returns null when the PID cannot be mapped or the process is gone.
+    /// </summary>
+    private Process? GetGameProcessFromWinePid(int winePid)
+    {
+        try
+        {
+            var unixPid = this.compatibility.GetUnixProcessId(winePid);
 
             if (unixPid == 0)
             {
                 Log.Error("Could not retrieve Unix process ID; trying fallback process lookup");
-                return FindGameProcessByPolling();
+                return null;
             }
 
             var gameProcess = Process.GetProcessById(unixPid);
-            Log.Verbose($"Got game process handle {gameProcess.Handle} with Unix pid {gameProcess.Id} and Wine pid {dalamudConsoleOutput.Pid}");
+            Log.Verbose($"Got game process with Unix pid {gameProcess.Id} and Wine pid {winePid}");
             return gameProcess;
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Could not retrieve game Process information; trying fallback process lookup");
-            return FindGameProcessByPolling();
+            return null;
         }
     }
 
     /// <summary>
-    /// Fallback: poll for the game process by known executable names.
-    /// Used when the Dalamud injector's stdout can't be read (e.g. under UMU/pressure-vessel).
+    /// Reads the injector's stdout, looking for the JSON line that reports the
+    /// Wine PID of the launched game. Runs on its own thread so the process
+    /// lookup is never blocked by a pipe that may only be closed on exit.
     /// </summary>
-    private static Process? FindGameProcessByPolling()
+    private static void ReadInjectorOutput(Process dalamudProcess, InjectorOutput output)
     {
-        var currentPid = Environment.ProcessId;
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            foreach (var exeName in KnownGameExes)
+            // Keep checking for valid json output, but only 5 times.
+            // If it's still erroring out at that point, the lookup falls back
+            // to the process name scan.
+            var invalidJsonCount = 0;
+
+            while (invalidJsonCount < 5)
             {
+                var line = dalamudProcess.StandardOutput.ReadLine();
+
+                if (line == null)
+                    break;
+
+                Console.WriteLine(line);
+
                 try
                 {
-                    var processes = Process.GetProcessesByName(exeName)
-                        .Concat(Process.GetProcessesByName(exeName.Replace(".exe", "")))
-                        .DistinctBy(p => p.Id)
-                        .ToList();
+                    var parsed = JsonConvert.DeserializeObject<DalamudConsoleOutput>(line);
 
-                    var match = processes
-                        .Where(p => p.Id != currentPid)
-                        .Where(p =>
-                        {
-                            try { return p.StartTime > Process.GetCurrentProcess().StartTime; }
-                            catch { return true; }
-                        })
-                        .OrderByDescending(p =>
-                        {
-                            try { return p.StartTime.Ticks; }
-                            catch { return 0L; }
-                        })
-                        .FirstOrDefault();
-
-                    if (match != null)
+                    if (parsed != null)
                     {
-                        Log.Information("Game process found by polling: {ExeName} pid {Pid}", exeName, match.Id);
-                        return match;
+                        output.Value = parsed;
+                        break;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Verbose(ex, "Error while polling for {ExeName}", exeName);
+                    Log.Warning(ex, $"Couldn't parse Dalamud output: {line}");
                 }
+
+                invalidJsonCount++;
             }
 
-            Thread.Sleep(1000);
+            // Drain remaining output so the injector never blocks on a full pipe.
+            while (!dalamudProcess.StandardOutput.EndOfStream)
+            {
+                var line = dalamudProcess.StandardOutput.ReadLine();
+
+                if (line != null)
+                    Console.WriteLine(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not read the Dalamud injector output");
+        }
+        finally
+        {
+            output.Closed = true;
+        }
+    }
+
+    /// <summary>
+    /// Fallback: look for the game process by known executable names.
+    /// Used when the Dalamud injector's stdout can't be read (e.g. under UMU/pressure-vessel).
+    /// </summary>
+    private static Process? FindGameProcessByName()
+    {
+        var currentPid = Environment.ProcessId;
+        var launcherStartTime = GetSafeStartTime(Process.GetCurrentProcess());
+
+        foreach (var exeName in KnownGameExes)
+        {
+            var processes = new Dictionary<int, Process>();
+
+            try
+            {
+                foreach (var process in Process.GetProcessesByName(exeName)
+                             .Concat(Process.GetProcessesByName(exeName.Replace(".exe", ""))))
+                {
+                    if (processes.ContainsKey(process.Id))
+                    {
+                        process.Dispose();
+                        continue;
+                    }
+
+                    processes.Add(process.Id, process);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Verbose(ex, "Error while polling for {ExeName}", exeName);
+
+                foreach (var process in processes.Values)
+                    process.Dispose();
+
+                continue;
+            }
+
+            Process? match = null;
+
+            try
+            {
+                match = processes.Values
+                    .Where(p => p.Id != currentPid)
+                    .Where(p =>
+                    {
+                        var startTime = GetSafeStartTime(p);
+                        return startTime is null || launcherStartTime is null || startTime > launcherStartTime;
+                    })
+                    .OrderByDescending(p => GetSafeStartTime(p) ?? DateTime.MinValue)
+                    .FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                Log.Verbose(ex, "Error while polling for {ExeName}", exeName);
+            }
+
+            foreach (var process in processes.Values)
+            {
+                if (!ReferenceEquals(process, match))
+                    process.Dispose();
+            }
+
+            if (match != null)
+            {
+                Log.Information("Game process found by polling: {ExeName} pid {Pid}", exeName, match.Id);
+                return match;
+            }
         }
 
-        Log.Error("Could not find game process within 30 seconds");
         return null;
+    }
+
+    private static DateTime? GetSafeStartTime(Process process)
+    {
+        try
+        {
+            return process.StartTime;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Thread-safe holder for the JSON output produced by the injector.
+    /// </summary>
+    private sealed class InjectorOutput
+    {
+        private readonly object gate = new();
+        private DalamudConsoleOutput? value;
+        private bool closed;
+
+        public DalamudConsoleOutput? Value
+        {
+            get { lock (this.gate) return this.value; }
+            set { lock (this.gate) this.value = value; }
+        }
+
+        public bool Closed
+        {
+            get { lock (this.gate) return this.closed; }
+            set { lock (this.gate) this.closed = value; }
+        }
     }
 }

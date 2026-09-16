@@ -172,6 +172,13 @@ public class LauncherApp : Component
         if (this.isModalDrawing)
             throw new InvalidOperationException("Cannot open modal while another modal is open");
 
+        // The window may be hidden (for example while the game was launching), and
+        // the render loop skips frames when there is no input. Make sure the modal
+        // is actually visible and that a frame gets drawn, otherwise a caller such
+        // as ShowMessageBlocking() would wait forever on an invisible dialog.
+        Program.ShowWindow();
+        Program.Invalidate();
+
         this.modalText = text;
         this.modalTitle = title;
         this.modalButtonText = modalButtonText;

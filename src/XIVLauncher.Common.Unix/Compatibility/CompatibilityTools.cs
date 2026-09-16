@@ -66,7 +66,9 @@ public class CompatibilityTools
 
         this.umuDirectory.Create();
 
-        this.logWriter = new StreamWriter(wineSettings.LogFile.FullName);
+        // Auto-flush so wine.log is complete even when the launcher is killed or
+        // exits through Environment.Exit (which does not run finalizers).
+        this.logWriter = new StreamWriter(wineSettings.LogFile.FullName) { AutoFlush = true };
 
         if (!wineSettings.Prefix.Exists)
             wineSettings.Prefix.Create();
@@ -337,6 +339,12 @@ public class CompatibilityTools
             {
                 logWriter.WriteLine(errLine.Data);
                 Console.Error.WriteLine(errLine.Data);
+
+                // Also surface the interesting Wine/Proton/umu output in the
+                // launcher log. The repetitive gamemode loader warnings are
+                // filtered out to keep it readable.
+                if (!errLine.Data.Contains("gamemodeauto: dlopen failed", StringComparison.Ordinal))
+                    Log.Information("[WINE] {Line}", errLine.Data);
             }
             catch (Exception ex) when (ex is ArgumentOutOfRangeException ||
                                        ex is OverflowException ||
