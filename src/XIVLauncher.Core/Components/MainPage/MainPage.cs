@@ -389,9 +389,9 @@ public class MainPage : Page
             }
             var enableUidCache = App.Settings.IsUidCacheEnabled ?? false;
             var gamePath = App.Settings.GamePath!;
-            var checkResult = await App.Launcher.CheckGameUpdate(Area, gamePath, action == LoginAction.Repair);
-            if (checkResult.State == Launcher.LoginState.NeedsPatchGame || action == LoginAction.Repair)
-                return checkResult;
+            // var checkResult = await App.Launcher.CheckGameUpdate(Area, gamePath, action == LoginAction.Repair);
+            // if (checkResult.State == Launcher.LoginState.NeedsPatchGame || action == LoginAction.Repair)
+            //     return checkResult;
             
             if (type == LoginType.AutoLoginSession)
             {
